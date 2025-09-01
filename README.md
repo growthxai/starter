@@ -20,13 +20,36 @@ A modern, production-ready full-stack starter kit for building SaaS applications
 
 ## 📋 Prerequisites
 
-Before you begin, ensure you have the following installed:
+This project uses [mise](https://mise.jdx.dev/) for managing development environments. mise ensures everyone on your team uses the exact same versions of Ruby, Node.js, and other tools.
 
-- Ruby 3.3+ (check with `ruby -v`)
-- Node.js 20+ (check with `node -v`)
+### Install mise
+
+```bash
+# macOS
+brew install mise
+
+# Or use the installer script
+curl https://mise.run | sh
+
+# Add to your shell (if not already done)
+echo 'eval "$(mise activate bash)"' >> ~/.bashrc  # for bash
+echo 'eval "$(mise activate zsh)"' >> ~/.zshrc    # for zsh
+```
+
+### System Dependencies
+
+You'll also need these installed on your system:
+
 - PostgreSQL 14+ (check with `psql --version`)
 - Redis 6+ (check with `redis-server --version`)
-- Yarn 1.22+ (check with `yarn -v`)
+
+```bash
+# macOS
+brew install postgresql@14 redis
+
+# Ubuntu/Debian
+sudo apt-get install postgresql postgresql-client redis-server
+```
 
 ## 🎯 Getting Started - Step by Step
 
@@ -34,7 +57,7 @@ Before you begin, ensure you have the following installed:
 
 ```bash
 # Clone the starter kit with your app name
-git clone https://github.com/yourusername/rails-starter.git your-app-name
+git clone git@github.com:growthxai/starter.git your-app-name
 cd your-app-name
 
 # Remove the original git history and start fresh
@@ -70,9 +93,18 @@ After running the script, you'll need to:
 1. Update the page title in `app/views/layouts/application.html.erb`
 2. Drop and recreate your database (covered in Step 5)
 
-### Step 3: Install Dependencies
+### Step 3: Set Up Development Environment
 
 ```bash
+# Install all required tool versions (Ruby, Node.js, Yarn)
+mise install
+
+# Trust the mise configuration for this project
+mise trust
+
+# Verify tools are installed
+mise list
+
 # Install Ruby dependencies
 bundle install
 
@@ -80,17 +112,15 @@ bundle install
 yarn install
 ```
 
-### Step 4: Set Up Your Environment
+**Note:** For local environment overrides, create `mise.toml.local` (gitignored):
 
-```bash
-# Copy the example environment file
-cp .env.example .env
-
-# Edit .env with your favorite editor
-# At minimum, you can leave most values as defaults for development
+```toml
+# mise.toml.local - Local overrides (not committed)
+[env]
+DATABASE_URL = "postgres://localhost/my_custom_db"
 ```
 
-### Step 5: Set Up the Database
+### Step 4: Set Up the Database
 
 ```bash
 # Create and migrate the database
@@ -101,7 +131,7 @@ bundle exec rails db:seed
 # You should see: "Seed data created successfully!"
 ```
 
-### Step 6: Start the Development Server
+### Step 5: Start the Development Server
 
 ```bash
 # Start Rails, Vite, and Sidekiq
@@ -111,6 +141,89 @@ bundle exec rails db:seed
 ```
 
 Visit http://localhost:3000 and you should see the welcome page! 🎉
+
+## 🔑 Managing Secrets with Rails Credentials
+
+Rails provides encrypted credentials for managing sensitive data like API keys and passwords. Never commit secrets to git!
+
+### Understanding Rails Credentials
+
+Rails uses encrypted YAML files to store secrets:
+
+- `config/credentials/development.yml.enc` - Development environment secrets
+- `config/credentials/production.yml.enc` - Production environment secrets
+- `config/credentials/test.yml.enc` - Test environment secrets
+
+Each environment has its own encryption key:
+
+- `config/credentials/development.key` - Never commit this!
+- `config/credentials/production.key` - Never commit this!
+
+### Adding Secrets
+
+```bash
+# Edit development credentials
+EDITOR="code --wait" rails credentials:edit --environment development
+
+# Or use nano/vim
+EDITOR="nano" rails credentials:edit --environment development
+```
+
+This opens a YAML file where you add your secrets:
+
+```yaml
+# Example credentials file
+stripe:
+  publishable_key: pk_test_51ABC...
+  secret_key: sk_test_51ABC...
+
+aws:
+  access_key_id: AKIA...
+  secret_access_key: abc123...
+
+google:
+  client_id: 123456789.apps.googleusercontent.com
+  client_secret: GOCSPX-abc123...
+
+resend:
+  api_key: re_abc123...
+
+# You can organize however makes sense
+third_party:
+  service_a:
+    api_key: key_abc123
+  service_b:
+    token: token_xyz789
+```
+
+### Accessing Credentials in Code
+
+```ruby
+# In Rails controllers, models, etc.
+Rails.application.credentials.stripe[:secret_key]
+Rails.application.credentials.aws[:access_key_id]
+Rails.application.credentials.dig(:third_party, :service_a, :api_key)
+
+# In environment variables (for gems that expect ENV vars)
+# Add to config/initializers/credentials.rb:
+ENV["STRIPE_SECRET_KEY"] = Rails.application.credentials.stripe[:secret_key]
+```
+
+### Team Collaboration
+
+To share credentials with your team:
+
+1. Share the key file securely (1Password)
+2. **Team member setup**:
+
+   ```bash
+   # Create the key file
+   mkdir -p config/credentials
+   echo "your-key-here" > config/credentials/development.key
+
+   # Verify it works
+   rails credentials:show --environment development
+   ```
 
 ## 🔐 Setting Up Google OAuth (Optional)
 

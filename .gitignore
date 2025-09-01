@@ -10,6 +10,9 @@
 # Ignore all environment files.
 /.env*
 
+# Ignore local mise configuration overrides
+/mise.toml.local
+
 # Ignore all logfiles and tempfiles.
 /log/*
 /tmp/*
