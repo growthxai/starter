@@ -1,0 +1,56 @@
+# Dependencies
+node_modules
+vendor
+.bundle
+
+# Build outputs
+dist
+build
+coverage
+public
+tmp
+
+# Minified files
+*.min.js
+*.min.css
+
+# Ruby specific
+*.gem
+*.rbc
+.ruby-version
+.ruby-gemset
+.rvmrc
+.rubocop.yml
+.rubocop_todo.yml
+
+# Rails specific
+log/*
+tmp/*
+db/*.sqlite3
+db/*.sqlite3-journal
+config/master.key
+config/credentials/*.key
+db/schema.rb
+db/cable_schema.rb
+
+# Environment files
+.env*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE and editor files
+.idea
+.vscode
+*.swp
+*.swo
+*~
+app/javascript/routes.js
+app/javascript/routes.d.ts
+
+# Shadcn UI
+app/frontend/components/ui/
+
+# Pipeline examples (all YAML pipeline files)
+docs/pipeline-examples/*.yml

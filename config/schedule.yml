@@ -1,0 +1,21 @@
+# Sidekiq-Cron schedule configuration
+#
+# Define your scheduled jobs here. Example:
+#
+# daily_report:
+#   cron: "0 2 * * *"  # Run daily at 2 AM
+#   class: "DailyReportJob"
+#   queue: default
+#   args: []
+#   description: "Generate daily reports"
+#
+# weekly_cleanup:
+#   cron: "0 0 * * 0"  # Run weekly on Sunday at midnight
+#   class: "CleanupJob"
+#   queue: low
+#   description: "Clean up old records"
+#
+# For cron syntax reference: https://crontab.guru/
+
+# Empty hash for when no jobs are defined yet
+{}

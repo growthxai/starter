@@ -1,0 +1,65 @@
+#!/usr/bin/env ruby
+
+# Script to rename the Rails application from Starter to your app name
+#
+# Usage: bin/rename-app MyAwesomeApp
+#
+# This will update:
+# - Module name in config/application.rb
+# - Database names in config/database.yml
+# - Cable channel prefix in config/cable.yml
+# - Package name in package.json (optional)
+
+require "fileutils"
+require "pathname"
+
+if ARGV.empty?
+  puts "Usage: bin/rename-app YourAppName"
+  puts "Example: bin/rename-app MyAwesomeApp"
+  exit 1
+end
+
+new_name = ARGV[0]
+snake_case_name =
+  new_name.gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2').gsub(/([a-z\d])([A-Z])/, '\1_\2').downcase
+
+puts "Renaming app to: #{new_name}"
+puts "Database prefix will be: #{snake_case_name}_"
+puts ""
+
+# Update config/application.rb
+application_rb = File.read("config/application.rb")
+application_rb.gsub!(/module Starter/, "module #{new_name}")
+File.write("config/application.rb", application_rb)
+puts "✅ Updated config/application.rb"
+
+# Update config/database.yml
+database_yml = File.read("config/database.yml")
+database_yml.gsub!(/starter_/, "#{snake_case_name}_")
+File.write("config/database.yml", database_yml)
+puts "✅ Updated config/database.yml"
+
+# Update config/cable.yml
+cable_yml = File.read("config/cable.yml")
+cable_yml.gsub!(/starter_/, "#{snake_case_name}_")
+File.write("config/cable.yml", cable_yml)
+puts "✅ Updated config/cable.yml"
+
+# Update package.json (optional)
+if File.exist?("package.json")
+  package_json = File.read("package.json")
+  package_json.gsub!(/"name": ".*?"/, %Q["name": "#{snake_case_name}"])
+  File.write("package.json", package_json)
+  puts "✅ Updated package.json"
+end
+
+puts ""
+puts "🎉 App renamed successfully!"
+puts ""
+puts "Next steps:"
+puts "1. Update the page title in app/views/layouts/application.html.erb"
+puts "2. Drop and recreate the database:"
+puts "   bundle exec rails db:drop db:create db:migrate db:seed"
+puts "3. Restart your development server"
+puts ""
+puts "Happy coding with #{new_name}! 🚀"
