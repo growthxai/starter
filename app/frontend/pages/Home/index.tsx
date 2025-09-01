@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
-import { root_path, sidekiq_web_path } from '@/rails/routes';
+import { home_show_path, root_path, sidekiq_web_path } from '@/rails/routes';
 import { Link } from '@inertiajs/react';
+import { ModalLink } from '@inertiaui/modal-react';
 
 interface Props {
   message: string;
@@ -36,13 +37,25 @@ export default function Index({ message }: Props) {
             Shadcn/UI
           </Link>
         </Button>
-
         <Button variant="outline" asChild>
-          <a href={sidekiq_web_path()} target="_blank" rel="noopener noreferrer">Sidekiq</a>
+          <a href={sidekiq_web_path()} target="_blank" rel="noopener noreferrer">
+            Sidekiq
+          </a>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href={root_path()}>Reload</Link>
         </Button>
 
         <Button variant="outline" asChild>
-          <Link href={root_path()}>Reload</Link>
+          <ModalLink href={home_show_path()} navigate={true}>
+            Open Modal (with URL)
+          </ModalLink>
+        </Button>
+
+        <Button variant="outline" asChild>
+          <ModalLink href={home_show_path()} navigate={false}>
+            Open Modal (without URL)
+          </ModalLink>
         </Button>
       </div>
     </div>

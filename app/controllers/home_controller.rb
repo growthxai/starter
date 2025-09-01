@@ -5,4 +5,14 @@ class HomeController < ApplicationController
              message: "Welcome to your Rails + React + Inertia.js app!",
            }
   end
+
+  def show
+    render inertia_modal: "home/show",
+           props: {
+             title: "Modal Example",
+             content: "This is rendered in a modal! The URL changes and you can bookmark it.",
+             timestamp: Time.current.to_s,
+           },
+           base_url: root_path
+  end
 end

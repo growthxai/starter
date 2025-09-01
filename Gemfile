@@ -16,7 +16,7 @@ gem "propshaft"
 # gem "bcrypt", "~> 3.1.7"
 
 gem "inertia_rails"
-gem "inertia_rails-contrib", github: "skryukov/inertia_rails-contrib"
+gem "inertia_rails-contrib"
 gem "vite_rails", "~> 3.0"
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
