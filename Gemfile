@@ -1,7 +1,7 @@
 source "https://rubygems.org"
 
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
-gem "rails", "~> 8.0.2"
+gem "rails", "~> 8.1.0"
 gem "rack", ">= 3.1.16"
 # Use postgresql as the database for Active Record
 gem "pg", "~> 1.6"
