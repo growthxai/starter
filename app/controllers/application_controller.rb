@@ -1,4 +1,5 @@
 class ApplicationController < ActionController::Base
+  include Pagy::Method
   include InertiaConfiguration
   include PageTitleConcern
   include Analytics::Base

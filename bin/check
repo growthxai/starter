@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+
+# Pre-commit quality checks
+# Run format check, tests, and rubocop to ensure code quality
+
+echo "== Running format check =="
+npm run format:check || { echo "❌ Format check failed"; exit 1; }
+
+echo ""
+echo "== Running tests =="
+bin/rails test || { echo "❌ Tests failed"; exit 1; }
+
+echo ""
+echo "== Running rubocop =="
+bin/rubocop || { echo "❌ Rubocop failed"; exit 1; }
+
+echo ""
+echo "✅ All checks passed!"

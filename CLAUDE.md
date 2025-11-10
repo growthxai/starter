@@ -32,9 +32,11 @@ yarn run [script-name]                  # Run scripts
 - **Plan first** - Share work plan before coding complex features
 - **Rails conventions** - Follow DHH-style Rails patterns
 - **No React Router** - Use Inertia.js for all routing (`render inertia:`)
+- **Jbuilder for props** - Use jbuilder views for Inertia props, never inline `props:`
+- **Pagy pagination** - Use Pagy gem with jbuilder partials for consistent pagination
 - **TypeScript strict** - Avoid `any`, prefer interfaces over types
 - **shadcn first** - Use shadcn/ui components when available
-- **Performance minded** - Database indexing, query optimization, React.memo
+- **Performance minded** - Database indexing, query optimization, React.memo, jbuilder caching
 
 ## Available Code Review Agents
 
@@ -80,10 +82,8 @@ Follow RESTful conventions with the standard seven actions:
 ```ruby
 class ProjectsController < ApplicationController
   def index
-    render inertia: "projects/index",
-           props: {
-             projects: Project.includes(:owner).page(params[:page]),
-           }
+    @pagy, @projects = pagy(Project.includes(:owner))
+    render inertia: "projects/index" # Uses app/views/projects/index.json.jbuilder
   end
 
   def create
@@ -103,6 +103,285 @@ class ProjectsController < ApplicationController
   end
 end
 ```
+
+### Singular Resource Controllers for Custom Actions
+
+**CRITICAL PATTERN**: When you need custom actions beyond the standard 7, extract them into separate singular resource controllers. This keeps your code RESTful and follows DHH's philosophy.
+
+#### ❌ Bad: Custom actions in main controller
+
+```ruby
+class ProjectsController < ApplicationController
+  # ... standard 7 actions ...
+
+  # ❌ Custom actions pollute the controller
+  def archive
+    @project = Project.find(params[:id])
+    @project.archive!
+    redirect_to projects_path
+  end
+
+  def publish
+    @project = Project.find(params[:id])
+    @project.publish!
+    redirect_to project_path(@project)
+  end
+end
+```
+
+#### ✅ Good: Extract to singular resource controllers
+
+```ruby
+# app/controllers/projects/archives_controller.rb
+class Projects::ArchivesController < ApplicationController
+  def create
+    @project = Project.find(params[:project_id])
+    @project.archive!
+    redirect_to projects_path, notice: "Project archived"
+  end
+end
+
+# app/controllers/projects/publications_controller.rb
+class Projects::PublicationsController < ApplicationController
+  def create
+    @project = Project.find(params[:project_id])
+    @project.publish!
+    redirect_to project_path(@project), notice: "Project published"
+  end
+end
+```
+
+**Routes for singular resources:**
+
+```ruby
+resources :projects do
+  scope module: :projects do
+    resource :archive, only: [:create] # POST /projects/:project_id/archive
+    resource :publication, only: [:create] # POST /projects/:project_id/publication
+  end
+end
+```
+
+**Benefits:**
+
+- Each controller has a single, clear responsibility
+- RESTful URLs and HTTP verbs
+- Easy to test and maintain
+- Follows Rails conventions
+
+**Common Patterns:**
+
+```ruby
+# Bulk operations
+resource :bulk_deletion, only: [:create]
+resource :bulk_approval, only: [:create]
+
+# State transitions
+resource :activation, only: %i[create destroy]
+resource :approval, only: [:create]
+```
+
+### Jbuilder Views for Inertia Props
+
+This project uses **jbuilder views** to structure JSON props for Inertia.js. This approach provides better organization, caching, and separation of concerns compared to inline props.
+
+#### How It Works
+
+When you call `render inertia: "projects/index"`, Rails automatically looks for a jbuilder view at `app/views/projects/index.json.jbuilder` thanks to the `inertia_view_assigns` method in `InertiaConfiguration`.
+
+Place jbuilder files in `app/views/` matching your controller namespace:
+
+```
+app/views/
+├── projects/
+│   ├── index.json.jbuilder
+│   ├── show.json.jbuilder
+│   └── _project.json.jbuilder
+└── shared/
+    └── _pagination.json.jbuilder
+```
+
+#### Basic Jbuilder View
+
+```ruby
+# app/views/projects/index.json.jbuilder
+json.projects { json.array! @projects, partial: "projects/project", as: :project }
+
+json.partial! "shared/pagination", pagy: @pagy
+```
+
+```ruby
+# app/views/projects/_project.json.jbuilder
+json.(project, :id, :name, :description, :created_at)
+json.owner do
+  json.(project.owner, :id, :name, :email)
+end
+```
+
+#### Caching with json.cache!
+
+Use `json.cache!` to cache expensive computations. Rails automatically invalidates when the model updates:
+
+```ruby
+# app/views/projects/_project.json.jbuilder
+show_stats = local_assigns[:show_stats]
+
+json.cache! [project, show_stats] do
+  json.(project, :id, :name, :description)
+
+  if show_stats
+    json.task_count project.tasks.count
+    json.completion_rate project.completion_rate
+  end
+end
+```
+
+**Cache key tips:**
+
+- Include model instance for automatic invalidation
+- Include local variables that affect output (`[project, show_stats]`)
+- Nested `json.cache!` blocks for granular control
+
+#### Shared Partials with Pagy Pagination
+
+The `shared/_pagination.json.jbuilder` partial works with Pagy gem:
+
+```ruby
+# app/views/shared/_pagination.json.jbuilder
+key = local_assigns[:key] ? "#{local_assigns[:key]}_pagination" : :pagination
+
+json.set! key do
+  json.page pagy.page
+  json.per_page pagy.limit
+  json.total pagy.count
+  json.total_pages pagy.last
+  json.prev_page pagy.previous
+  json.next_page pagy.next
+end
+```
+
+**Usage in controller:**
+
+```ruby
+class ProjectsController < ApplicationController
+  include Pagy::Method
+
+  def index
+    @pagy, @projects = pagy(Project.all, limit: 20)
+    render inertia: "projects/index"
+  end
+end
+```
+
+**Usage in jbuilder:**
+
+```ruby
+# app/views/projects/index.json.jbuilder
+json.projects { json.array! @projects, partial: "projects/project", as: :project }
+
+# Default key (pagination)
+json.partial! "shared/pagination", pagy: @pagy
+
+# Custom key (projects_pagination)
+json.partial! "shared/pagination", pagy: @pagy, key: "projects"
+```
+
+**Frontend usage:**
+
+```tsx
+// app/frontend/pages/projects/index.tsx
+interface Props {
+  projects: Project[];
+  pagination: {
+    page: number;
+    perPage: number;
+    total: number;
+    totalPages: number;
+    prevPage: number | null;
+    nextPage: number | null;
+  };
+}
+
+export default function Index({ projects, pagination }: Props) {
+  // Use pagination data for UI
+}
+```
+
+#### Partials with Conditional Data
+
+Use `local_assigns` to make partials flexible:
+
+```ruby
+# app/views/projects/_project.json.jbuilder
+show_stats = local_assigns[:show_stats]
+show_owner = local_assigns.fetch(:show_owner, true)
+
+json.cache! [project, show_stats, show_owner] do
+  json.(project, :id, :name, :description)
+
+  json.owner project.owner, partial: "users/user", as: :user if show_owner
+
+  if show_stats
+    json.stats do
+      json.task_count project.tasks.count
+      json.completion_rate project.completion_rate
+    end
+  end
+end
+```
+
+**Call with parameters:**
+
+```ruby
+json.projects @projects do |project|
+  json.partial! "projects/project",
+                project: project,
+                show_stats: true,
+                show_owner: false
+end
+```
+
+#### ETags for HTTP Caching
+
+Combine jbuilder caching with HTTP ETags for maximum performance:
+
+```ruby
+class ProjectsController < ApplicationController
+  def show
+    @project = Project.find(params[:id])
+
+    # ETag includes model and request type
+    if stale?(strong_etag: [@project, request.inertia?])
+      render inertia: "projects/show" # Uses jbuilder view
+    end
+  end
+end
+```
+
+**Benefits:**
+
+- Browser caches entire response
+- Rails sends 304 Not Modified if unchanged
+- Works with Inertia.js partial reloads
+
+#### Jbuilder Best Practices
+
+**Do:**
+
+- ✅ Use jbuilder views instead of inline props for better organization
+- ✅ Use partials for reusable JSON structures
+- ✅ Cache with `json.cache!` for expensive queries
+- ✅ Include cache keys that affect output
+- ✅ Use `json.(model, :attr1, :attr2)` for multiple attributes
+- ✅ Keep jbuilder views focused on data presentation
+- ✅ Mirror controller namespaces in view directories
+
+**Don't:**
+
+- ❌ Put business logic in jbuilder views (belongs in models)
+- ❌ N+1 queries (use `includes` in controller)
+- ❌ Forget to cache nested associations
+- ❌ Mix inline props and jbuilder in same controller
 
 ### Models
 
@@ -457,6 +736,202 @@ end
 - Validate and sanitize user input
 - Use encrypted credentials for secrets
 
+## Developer Tools & Utilities
+
+### Layout Resolver
+
+This project uses a **layout resolver** to automatically assign layouts based on page paths, avoiding duplication between client-side and SSR rendering.
+
+**How it works:**
+
+```typescript
+// app/frontend/lib/layout-resolver.ts
+export default function resolvePageLayout(name: string, page: any): any {
+  if (page.default.layout) {
+    return page; // Use explicit layout if specified
+  }
+
+  page.default.layout = (pageComponent: any) => {
+    const pageProps = pageComponent.props || {};
+
+    // Can add conditional logic here:
+    // if (name.startsWith('admin/')) return AdminLayout
+
+    return createElement(ApplicationLayout, { ...pageProps }, pageComponent);
+  };
+
+  return page;
+}
+```
+
+**Usage in entrypoint:**
+
+```typescript
+// app/frontend/entrypoints/inertia.ts
+import resolvePageLayout from '../lib/layout-resolver';
+
+createInertiaApp({
+  resolve: (name): any => {
+    const pages = import.meta.glob<any>('../pages/**/*.tsx', { eager: true });
+    const page = pages[`../pages/${name}.tsx`];
+    return resolvePageLayout(name, page);
+  },
+  // ...
+});
+```
+
+**Benefits:**
+
+- Automatic layout assignment based on page path
+- Single source of truth for layout logic
+- Works with both client-side and SSR
+- Easy to extend with custom logic
+
+### PgSync - Production Database Sync
+
+This project includes **pgsync** for safely syncing production data to development environments.
+
+**Configuration:**
+
+```yaml
+# .pgsync.yml
+from: $(echo $DATABASE_URL)?sslmode=require
+to: postgres://localhost:5432/starter_development
+
+exclude:
+  - active_storage_attachments
+  - active_storage_blobs
+  - ahoy_events
+  - ahoy_visits
+  - schema_migrations
+
+# Data anonymization
+data_rules:
+  email: unique_email
+  phone: unique_phone
+  '*password*': null
+  '*token*': null
+  '*secret*': null
+```
+
+**Usage:**
+
+```bash
+# Set DATABASE_URL to production database
+export DATABASE_URL=postgres://user:pass@host:5432/dbname
+
+# Sync all tables (respecting excludes and anonymization)
+bin/sync_prod
+
+# Or inline:
+DATABASE_URL=postgres://... bin/sync_prod
+```
+
+**Safety features:**
+
+- Data anonymization for sensitive fields
+- Excluded tables (sessions, logs, analytics)
+- Truncates before sync to avoid duplicates
+- Sequential jobs to prevent deadlocks
+
+### bin/check - Pre-commit Quality Checks
+
+Run all quality checks before committing:
+
+```bash
+bin/check
+```
+
+This script runs:
+1. `npm run format:check` - Code formatting
+2. `bin/rails test` - Test suite
+3. `bin/rubocop` - Ruby linting
+
+**Recommended workflow:**
+
+```bash
+# Make changes
+git add .
+
+# Run checks
+bin/check
+
+# If all pass, commit
+git commit -m "Your message"
+```
+
+### Ahoy + Inertia Integration
+
+This project uses **Ahoy** for analytics with special handling for Inertia.js requests.
+
+**How it works:**
+
+The `Analytics::Providers::Ahoy` concern automatically skips duplicate visit tracking for Inertia requests:
+
+```ruby
+# app/controllers/concerns/analytics/providers/ahoy.rb
+def skip_ahoy_tracking?
+  return false unless inertia_request?
+
+  visit_token = cookies[:ahoy_visit]
+  return false unless visit_token
+
+  visit = ::Ahoy::Visit.find_by(visit_token: visit_token)
+  return false unless visit
+
+  # Only skip if visit is still within the duration window
+  (Time.current - visit.started_at) < ::Ahoy.visit_duration
+end
+```
+
+**Why this matters:**
+
+- Inertia.js uses AJAX for subsequent page loads
+- Without this, each Inertia navigation creates a new visit
+- With this, visits are only tracked on initial page load or after expiry
+- Provides accurate visitor analytics
+
+**Tracking custom events:**
+
+```ruby
+class ProjectsController < ApplicationController
+  def create
+    @project = Project.new(project_params)
+
+    if @project.save
+      track("project_created", project_id: @project.id)
+      redirect_to @project
+    end
+  end
+end
+```
+
+### Additional Development Gems
+
+**letter_opener** (development):
+- Opens emails in browser instead of sending
+- Automatic with Rails development mode
+- View at `/letter_opener` when emails are sent
+
+**vcr** (test):
+- Records HTTP interactions for tests
+- Prevents hitting external APIs in tests
+- Fast and deterministic test runs
+
+```ruby
+# test/test_helper.rb
+VCR.configure do |config|
+  config.cassette_library_dir = "test/vcr_cassettes"
+  config.hook_into :webmock
+end
+
+# In tests
+VCR.use_cassette("api_call") do
+  # HTTP request is recorded/replayed
+  response = HTTParty.get("https://api.example.com/data")
+end
+```
+
 ## Pre-Commit Checklist
 
 ```bash
@@ -497,25 +972,61 @@ bundle exec rails test test/models   # Run specific tests
 bundle exec rubocop                  # Ruby linting
 yarn prettier --check .              # Check formatting
 yarn tsc                             # TypeScript checking
+bin/check                            # Run all quality checks
+
+# Database
+bin/sync_prod                        # Sync production data (requires DATABASE_URL)
 ```
 
 ## Common Patterns to Follow
 
-✅ Use Inertia.js for all routing
-✅ Follow RESTful conventions
-✅ Use shadcn/ui components
-✅ Implement proper TypeScript types
-✅ Add database indexes
-✅ Handle errors gracefully
+### Controllers & Routes
+✅ Use Inertia.js for all routing (no React Router)
+✅ Follow RESTful conventions with 7 standard actions
+✅ Extract custom actions into singular resource controllers
+✅ Use jbuilder views for Inertia props (not inline props)
+
+### Data & Performance
+✅ Use Pagy for pagination with jbuilder partials
+✅ Cache jbuilder views with `json.cache!`
+✅ Add database indexes on foreign keys
+✅ Use `includes` to prevent N+1 queries
+✅ Implement ETags for HTTP caching
+
+### Frontend
+✅ Use shadcn/ui components when available
+✅ Implement proper TypeScript types (avoid `any`)
+✅ Use layout resolver for automatic layout assignment
+✅ Context API to avoid prop drilling
+
+### Testing & Quality
 ✅ Write tests for critical paths
+✅ Run bin/check before committing
+✅ Use VCR for HTTP interactions in tests
+✅ Handle errors gracefully
 
 ## Anti-Patterns to Avoid
 
-❌ Using React Router instead of Inertia
-❌ Returning JSON from controllers (use `render inertia:`)
-❌ Using `any` type in TypeScript
-❌ Custom CSS when Tailwind utilities exist
+### Controllers & Routes
+❌ Custom actions in main resource controllers (extract to singular resources)
+❌ Controllers with more than 7 actions
+❌ Inline props in controllers (use jbuilder views)
+❌ Returning JSON directly from controllers (use `render inertia:`)
+
+### Data & Performance
 ❌ Missing database indexes on foreign keys
-❌ Exposing sensitive data in responses
+❌ N+1 queries (use `includes`, `joins`)
+❌ Forgetting to cache expensive jbuilder computations
+❌ Business logic in jbuilder views (belongs in models)
+
+### Frontend
+❌ Using React Router instead of Inertia
+❌ Using `any` type in TypeScript
 ❌ Class components (use functional)
 ❌ Prop drilling (use Context or composition)
+❌ Custom CSS when Tailwind utilities exist
+
+### Security & Data
+❌ Exposing sensitive data in responses
+❌ Syncing production data without anonymization
+❌ Committing secrets to repository

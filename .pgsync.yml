@@ -1,0 +1,42 @@
+# database URLs take the format of:
+#   postgres://user:password@host:port/dbname
+#
+# TODO: note from pgsync below
+# we *highly recommend* you use sslmode=verify-full when possible
+# see https://ankane.org/postgres-sslmode-explained for more info
+
+from: $(echo $DATABASE_URL)?sslmode=require
+
+to: postgres://localhost:5432/starter_development
+
+exclude:
+  - active_storage_attachments
+  - active_storage_blobs
+  - active_storage_variant_records
+  - action_text_rich_texts
+  - ahoy_events
+  - ahoy_visits
+  - ar_internal_metadata
+  - schema_migrations
+  - versions
+
+# protect sensitive information
+data_rules:
+  email: unique_email
+  phone: unique_phone
+  last_name: random_letter
+  birthday: random_date
+  passw: null
+  '*encrypted*': null
+  '*password*': null
+  '*secret*': null
+  '*token*': null
+  '*key*': null
+  '*crypt*': null
+  '*digest*': null
+  '*salt*': null
+  '*certificate*': null
+  '*otp*': null
+  '*ssn*': null
+  '*cvv*': null
+  '*cvc*': null

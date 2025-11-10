@@ -3,10 +3,9 @@
 import { createInertiaApp } from '@inertiajs/react';
 import { renderApp } from '@inertiaui/modal-react';
 import * as Sentry from '@sentry/react';
-import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import ApplicationLayout from '../layouts/application';
 import { initTheme } from '../lib/theme';
+import resolvePageLayout from '../lib/layout-resolver';
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 
@@ -17,21 +16,7 @@ createInertiaApp({
   resolve: (name): any => {
     const pages = import.meta.glob<any>('../pages/**/*.tsx', { eager: true });
     const page = pages[`../pages/${name}.tsx`];
-
-    // If the page already has a layout specified, use it as-is
-    if (page.default.layout) {
-      return page;
-    }
-
-    // Otherwise set up dynamic layout resolution
-    page.default.layout = (page: any) => {
-      const pageProps = page.props || {};
-
-      // Default to Application layout
-      return createElement(ApplicationLayout, { ...pageProps }, page);
-    };
-
-    return page;
+    return resolvePageLayout(name, page);
   },
 
   setup({ el, App, props }) {

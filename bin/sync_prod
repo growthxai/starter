@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+
+# Usage:
+# ./bin/sync_prod          # Syncs all data using DATABASE_URL from environment
+# DATABASE_URL=postgres://... ./bin/sync_prod  # Syncs with explicit DATABASE_URL
+# See https://github.com/ankane/pgsync for more examples.
+
+if [ -z "$DATABASE_URL" ]; then
+  echo "⚠️  DATABASE_URL environment variable is not set."
+  echo "   Set DATABASE_URL to your production database:"
+  echo "   export DATABASE_URL=postgres://user:password@host:port/dbname"
+  exit 1
+fi
+
+echo "== Syncing production data =="
+echo "Source: $DATABASE_URL"
+echo ""
+
+# --truncate clears tables before syncing to avoid duplicate key errors
+# --jobs 1 runs sequentially to avoid deadlocks from parallel truncates
+pgsync --truncate --jobs 1

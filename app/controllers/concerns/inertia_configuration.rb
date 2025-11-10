@@ -19,6 +19,15 @@ module InertiaConfiguration
 
   private
 
+  # Get props from jbuilder template if it exists
+  def inertia_view_assigns
+    if lookup_context.exists? action_name, controller_path, false, [], formats: [:json]
+      JSON.parse render_to_string(formats: [:json])
+    else
+      {}
+    end
+  end
+
   # Check if this is an Inertia request (not the initial page load)
   def inertia_request?
     request.headers["X-Inertia"].present?

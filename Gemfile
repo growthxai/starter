@@ -69,6 +69,9 @@ gem "lograge"
 # Analytics
 gem "ahoy_matey"
 
+# Pagination
+gem "pagy", "~> 9.3"
+
 group :development, :test do
   gem "bundler-audit"
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
@@ -91,6 +94,12 @@ end
 group :development do
   # Use console on exceptions pages [https://github.com/rails/web-console]
   gem "web-console"
+
+  # Database sync tool for pulling production data
+  gem "pgsync"
+
+  # Email preview in browser
+  gem "letter_opener"
 end
 
 group :test do
@@ -98,4 +107,7 @@ group :test do
   gem "capybara"
   gem "selenium-webdriver"
   gem "webmock"
+
+  # HTTP interaction recording for tests
+  gem "vcr"
 end
