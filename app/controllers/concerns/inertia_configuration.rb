@@ -4,20 +4,48 @@ module InertiaConfiguration
 
   included do
     # Configure Inertia prop transformer to convert keys to camelCase
-    inertia_config(
-      prop_transformer:
-        lambda { |props:| props.deep_transform_keys { |key| key.to_s.camelize(:lower) } },
-    )
+    # We need to parse to JSON and parse back to force ActiveRecord::Base instances to be serialized
+    # otherwise `deep_transform_keys` won't work on their attributes
+    inertia_config prop_transformer: ->(props:) do
+                     serialized_props = JSON.parse(props.to_json, symbolize_names: true)
+                     serialized_props.deep_transform_keys { it.to_s.camelize(:lower) }
+                   end
 
     # Share data with all Inertia responses
-    inertia_share currentUser: -> { current_user },
+    inertia_share flash: -> { flash.to_hash },
                   railsEnv: -> { Rails.env },
-                  frontendHealthCheck: -> { ENV.fetch("FRONTEND_HEALTHCHECK", "true") == "true" },
-                  page_title: -> { @page_title },
-                  flash: -> { flash.to_hash }
+                  pageTitle: -> { @page_title },
+                  breadcrumbs: -> { @breadcrumbs || [] },
+                  currentPath: -> { request.path },
+                  currentUser: -> { current_user },
+                  sidebarOpen: -> { cookies[:sidebar_state] != "false" },
+                  frontendHealthCheck: -> { ENV.fetch("FRONTEND_HEALTHCHECK", "true") == "true" }
   end
 
   private
+
+  # Transform params to underscore for Inertia requests only
+  # We need to do this here because any middleware is early in the stack and here we can transform
+  # before the ActionController::ParamsWrapper perform its magic.
+  # See https://api.rubyonrails.org/classes/ActionController/ParamsWrapper.html
+  #
+  # IMPORTANT: Only transforms Inertia.js requests (frontend)
+  def process_action(*)
+    # Only transform params for Inertia requests from frontend
+    # Don't transform external webhooks or API calls
+    if inertia_request?
+      request.request_parameters.deep_transform_keys! { |key| key.to_s.underscore }
+      request.query_parameters.deep_transform_keys! { |key| key.to_s.underscore }
+
+      if request.headers["X-Inertia-Partial-Data"].present?
+        partial_data = request.headers["X-Inertia-Partial-Data"].split(",").map(&:strip)
+        transformed_partial_data = partial_data.map { |key| key.to_s.underscore }
+        request.headers["X-Inertia-Partial-Data"] = transformed_partial_data.join(",")
+      end
+    end
+
+    super
+  end
 
   # Get props from jbuilder template if it exists
   def inertia_view_assigns
