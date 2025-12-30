@@ -1,7 +1,9 @@
 class ApplicationController < ActionController::Base
-  include Pagy::Method
+  include Pagy::Backend
   include InertiaConfiguration
   include PageTitleConcern
+  include Breadcrumbs
+  include ReactLayout
   include Analytics::Base
   include Analytics::Providers::Ahoy
 
