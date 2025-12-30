@@ -213,9 +213,7 @@ json.partial! "shared/pagination", pagy: @pagy
 ```ruby
 # app/views/projects/_project.json.jbuilder
 json.(project, :id, :name, :description, :created_at)
-json.owner do
-  json.(project.owner, :id, :name, :email)
-end
+json.owner { json.(project.owner, :id, :name, :email) }
 ```
 
 #### Caching with json.cache!
@@ -334,10 +332,7 @@ end
 
 ```ruby
 json.projects @projects do |project|
-  json.partial! "projects/project",
-                project: project,
-                show_stats: true,
-                show_owner: false
+  json.partial! "projects/project", project: project, show_stats: true, show_owner: false
 end
 ```
 
@@ -843,6 +838,7 @@ bin/check
 ```
 
 This script runs:
+
 1. `npm run format:check` - Code formatting
 2. `bin/rails test` - Test suite
 3. `bin/rubocop` - Ruby linting
@@ -909,11 +905,13 @@ end
 ### Additional Development Gems
 
 **letter_opener** (development):
+
 - Opens emails in browser instead of sending
 - Automatic with Rails development mode
 - View at `/letter_opener` when emails are sent
 
 **vcr** (test):
+
 - Records HTTP interactions for tests
 - Prevents hitting external APIs in tests
 - Fast and deterministic test runs
@@ -981,12 +979,14 @@ bin/sync_prod                        # Sync production data (requires DATABASE_U
 ## Common Patterns to Follow
 
 ### Controllers & Routes
+
 ✅ Use Inertia.js for all routing (no React Router)
 ✅ Follow RESTful conventions with 7 standard actions
 ✅ Extract custom actions into singular resource controllers
 ✅ Use jbuilder views for Inertia props (not inline props)
 
 ### Data & Performance
+
 ✅ Use Pagy for pagination with jbuilder partials
 ✅ Cache jbuilder views with `json.cache!`
 ✅ Add database indexes on foreign keys
@@ -994,12 +994,14 @@ bin/sync_prod                        # Sync production data (requires DATABASE_U
 ✅ Implement ETags for HTTP caching
 
 ### Frontend
+
 ✅ Use shadcn/ui components when available
 ✅ Implement proper TypeScript types (avoid `any`)
 ✅ Use layout resolver for automatic layout assignment
 ✅ Context API to avoid prop drilling
 
 ### Testing & Quality
+
 ✅ Write tests for critical paths
 ✅ Run bin/check before committing
 ✅ Use VCR for HTTP interactions in tests
@@ -1008,18 +1010,21 @@ bin/sync_prod                        # Sync production data (requires DATABASE_U
 ## Anti-Patterns to Avoid
 
 ### Controllers & Routes
+
 ❌ Custom actions in main resource controllers (extract to singular resources)
 ❌ Controllers with more than 7 actions
 ❌ Inline props in controllers (use jbuilder views)
 ❌ Returning JSON directly from controllers (use `render inertia:`)
 
 ### Data & Performance
+
 ❌ Missing database indexes on foreign keys
 ❌ N+1 queries (use `includes`, `joins`)
 ❌ Forgetting to cache expensive jbuilder computations
 ❌ Business logic in jbuilder views (belongs in models)
 
 ### Frontend
+
 ❌ Using React Router instead of Inertia
 ❌ Using `any` type in TypeScript
 ❌ Class components (use functional)
@@ -1027,6 +1032,7 @@ bin/sync_prod                        # Sync production data (requires DATABASE_U
 ❌ Custom CSS when Tailwind utilities exist
 
 ### Security & Data
+
 ❌ Exposing sensitive data in responses
 ❌ Syncing production data without anonymization
 ❌ Committing secrets to repository

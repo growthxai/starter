@@ -300,36 +300,59 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 ```
 your-app/
 ├── app/
-│   ├── controllers/        # Rails controllers
-│   ├── models/             # ActiveRecord models
-│   ├── views/              # ERB templates (minimal with Inertia)
+│   ├── controllers/
+│   │   └── concerns/
+│   │       ├── breadcrumbs.rb        # Breadcrumb DSL
+│   │       ├── react_layout.rb       # Layout selection
+│   │       └── inertia_configuration.rb
+│   ├── models/
+│   ├── views/
+│   │   └── shared/
+│   │       └── _pagination.json.jbuilder  # Pagy pagination partial
 │   ├── frontend/
-│   │   ├── pages/          # Inertia page components
-│   │   ├── components/     # Reusable React components
-│   │   │   └── ui/        # Shadcn/UI components
-│   │   ├── layouts/        # React layout components
-│   │   ├── lib/           # Utility functions
-│   │   └── hooks/         # Custom React hooks
-│   └── jobs/              # Background jobs
+│   │   ├── pages/                    # Inertia page components
+│   │   ├── components/
+│   │   │   ├── ui/                   # Shadcn/UI components
+│   │   │   ├── pagination.tsx        # Pagination wrapper
+│   │   │   └── workspace-sidebar.tsx
+│   │   ├── layouts/
+│   │   │   ├── application.tsx       # Default layout
+│   │   │   ├── workspace.tsx         # Sidebar + header
+│   │   │   └── fullscreen.tsx        # Minimal layout
+│   │   ├── types/
+│   │   │   └── pagination.ts         # PaginationData interface
+│   │   ├── lib/
+│   │   │   └── layout-resolver.ts    # Dynamic layout resolution
+│   │   └── hooks/
+│   └── jobs/
 ├── config/
-│   ├── routes.rb          # Rails routes
-│   ├── database.yml       # Database configuration
-│   └── initializers/      # Rails initializers
+│   ├── routes.rb
+│   ├── database.yml
+│   └── initializers/
 ├── db/
-│   ├── migrate/           # Database migrations
-│   └── seeds.rb          # Seed data
-└── test/                 # Test files
+│   ├── migrate/
+│   └── seeds.rb
+└── test/
 ```
 
 ## 🛠️ Common Customizations
 
-### Adding a New Page
+### Adding a New Page with Workspace Layout
 
-1. Create a Rails controller action:
+The starter includes three layouts:
+
+- **ApplicationLayout** - Default, minimal layout for public pages
+- **WorkspaceLayout** - Sidebar + header with breadcrumbs for authenticated pages
+- **FullscreenLayout** - No chrome, for focused tasks (onboarding, auth)
+
+1. Create a Rails controller with layout and breadcrumbs:
 
 ```ruby
 # app/controllers/dashboard_controller.rb
 class DashboardController < ApplicationController
+  react_layout "workspace"
+  with_breadcrumb label: "Dashboard", href: -> { dashboard_path }
+
   def show
     render inertia: "dashboard/show", props: { stats: { users: User.count } }
   end
@@ -354,4 +377,66 @@ export default function Show({ stats }: Props) {
 ```ruby
 # config/routes.rb
 resource :dashboard
+```
+
+### Using Breadcrumbs
+
+Breadcrumbs are automatically displayed in the WorkspaceLayout header:
+
+```ruby
+class ProjectsController < ApplicationController
+  react_layout "workspace"
+
+  # Class-level breadcrumb (applies to all actions)
+  with_breadcrumb label: "Projects", href: -> { projects_path }
+
+  def show
+    @project = Project.find(params[:id])
+    # Instance-level breadcrumb (specific to this action)
+    with_breadcrumb(label: @project.name)
+    render inertia: "projects/show"
+  end
+end
+```
+
+### Using Pagination
+
+The starter includes a pagination component that works with Pagy and js-routes:
+
+1. In your controller:
+
+```ruby
+def index
+  @pagy, @projects = pagy(Project.all)
+  render inertia: "projects/index"
+end
+```
+
+2. In your jbuilder view (`app/views/projects/index.json.jbuilder`):
+
+```ruby
+json.projects @projects, partial: "projects/project", as: :project
+json.partial! "shared/pagination", pagy: @pagy
+```
+
+3. In your React component:
+
+```tsx
+import Pagination from '@/components/pagination';
+import { projects_path } from '@/rails/routes';
+import type { PaginationData } from '@/types/pagination';
+
+interface Props {
+  projects: Project[];
+  pagination: PaginationData;
+}
+
+export default function Index({ projects, pagination }: Props) {
+  return (
+    <div>
+      {/* Your project list */}
+      <Pagination pagination={pagination} pathBuilder={projects_path} />
+    </div>
+  );
+}
 ```
