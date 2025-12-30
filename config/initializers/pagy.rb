@@ -1,2 +1,2 @@
-Pagy.options[:limit] = 100
-Pagy.options[:size] = 5
+Pagy::DEFAULT[:limit] = 100
+Pagy::DEFAULT[:size] = 5
