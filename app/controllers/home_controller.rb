@@ -1,4 +1,7 @@
 class HomeController < ApplicationController
+  react_layout "workspace"
+  with_breadcrumb label: "Home", href: -> { root_path }
+
   def index
     render inertia: "home/index",
            props: {
