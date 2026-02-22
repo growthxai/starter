@@ -20,17 +20,60 @@ default: &default
   pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
 
 development:
-  primary: &primary_development
+  primary:
     <<: *default
     database: starter_development
     pool: 10
+  queue:
+    <<: *default
+    database: starter_development
+    pool: 10
+    migrations_paths: db/queue_migrate
+  cache:
+    <<: *default
+    database: starter_development
+    pool: 10
+    migrations_paths: db/cache_migrate
+  cable:
+    <<: *default
+    database: starter_development
+    pool: 10
+    migrations_paths: db/cable_migrate
 
 test:
-  <<: *default
-  database: starter_test
-  url: <%= ENV["DATABASE_URL"] %>
+  primary:
+    <<: *default
+    database: starter_test
+    url: <%= ENV["DATABASE_URL"] %>
+  queue:
+    <<: *default
+    database: starter_test
+    url: <%= ENV["DATABASE_URL"] %>
+    migrations_paths: db/queue_migrate
+  cache:
+    <<: *default
+    database: starter_test
+    url: <%= ENV["DATABASE_URL"] %>
+    migrations_paths: db/cache_migrate
+  cable:
+    <<: *default
+    database: starter_test
+    url: <%= ENV["DATABASE_URL"] %>
+    migrations_paths: db/cable_migrate
 
 production:
-  primary: &primary_production
+  primary:
     <<: *default
     url: <%= ENV["DATABASE_URL"] %>
+  queue:
+    <<: *default
+    url: <%= ENV["DATABASE_URL"] %>
+    migrations_paths: db/queue_migrate
+  cache:
+    <<: *default
+    url: <%= ENV["DATABASE_URL"] %>
+    migrations_paths: db/cache_migrate
+  cable:
+    <<: *default
+    url: <%= ENV["DATABASE_URL"] %>
+    migrations_paths: db/cable_migrate

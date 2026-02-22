@@ -22,12 +22,11 @@ gem "vite_rails", "~> 3.0"
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[windows jruby]
 
-gem "redis"
-gem "connection_pool"
-
-# Background job processing
-gem "sidekiq", "~> 8.0"
-gem "sidekiq-cron"
+# Solid Stack (database-backed queue, cache, cable)
+gem "solid_queue"
+gem "solid_cache"
+gem "solid_cable"
+gem "mission_control-jobs"
 gem "turbo-rails"
 gem "importmap-rails"
 
@@ -47,11 +46,6 @@ gem "paper_trail"
 
 # Email delivery
 gem "resend"
-
-# Authentication
-gem "devise"
-gem "omniauth-google-oauth2"
-gem "omniauth-rails_csrf_protection"
 
 # JavaScript routes
 gem "js-routes"
