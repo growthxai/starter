@@ -9,15 +9,16 @@ module InertiaConfiguration
     inertia_config prop_transformer: ->(props:) do
                      serialized_props = JSON.parse(props.to_json, symbolize_names: true)
                      serialized_props.deep_transform_keys { it.to_s.camelize(:lower) }
+                   end,
+                   component_path_resolver: ->(path:, action:) do
+                     "#{path.dasherize}/#{action.dasherize}"
                    end
 
     # Share data with all Inertia responses
     inertia_share flash: -> { flash.to_hash },
                   railsEnv: -> { Rails.env },
                   pageTitle: -> { @page_title },
-                  breadcrumbs: -> { @breadcrumbs || [] },
                   currentPath: -> { request.path },
-                  currentUser: -> { current_user },
                   sidebarOpen: -> { cookies[:sidebar_state] != "false" },
                   frontendHealthCheck: -> { ENV.fetch("FRONTEND_HEALTHCHECK", "true") == "true" }
   end
