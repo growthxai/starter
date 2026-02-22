@@ -1,138 +1,246 @@
 # Claude Development Guide
 
-**Primary Guidelines:** This document provides comprehensive development guidelines for Rails + React + TypeScript + Inertia.js + shadcn/ui applications.
+**Philosophy:** Vanilla Rails backend + Simple plain React frontend, connected by Inertia.js.
 
-## Environment Setup
+## Core Principles
 
-**Package Manager:** This project uses Yarn for JavaScript package management. Always use `yarn` instead of `npm` for consistency.
-
-**Tool Management:** This project may use tool version managers (mise, asdf, rbenv, etc.). When available, prefix commands to ensure correct tool versions.
-
-```bash
-# Check for available tool managers
-which mise || which asdf
-
-# Examples with different managers:
-mise exec -- bundle exec rails test     # with mise
-asdf exec bundle exec rails test        # with asdf
-bundle exec rails test                  # direct execution
-
-# Always use yarn for JavaScript packages
-yarn install                            # Install dependencies
-yarn add [package-name]                 # Add new packages
-yarn run [script-name]                  # Run scripts
-```
-
-## Architecture Overview
+- **Rich domain models** over service objects
+- **CRUD controllers** over custom actions (7 standard actions only)
+- **Concerns** for horizontal code sharing
+- **Records as state** over boolean columns
+- **Jbuilder for ALL props** — use jbuilder views for Inertia props, never inline `props:`
+- **No React Router** — Inertia.js handles all routing
+- **Shadcn as Design System** — code in `app/frontend/components/ui` should not be changed
+- **Build it yourself** before reaching for gems
+- **Plan first** — share work plan before coding complex features
+- **TypeScript strict** — avoid `any`, prefer interfaces over types
+- **Performance minded** — database indexing, query optimization, jbuilder caching
 
 **Stack:** Rails 8.0 + React 19 + TypeScript + Inertia.js + Vite + shadcn/ui + Tailwind CSS
 
-**Key Principles:**
+---
 
-- **Plan first** - Share work plan before coding complex features
-- **Rails conventions** - Follow DHH-style Rails patterns
-- **No React Router** - Use Inertia.js for all routing (`render inertia:`)
-- **Jbuilder for props** - Use jbuilder views for Inertia props, never inline `props:`
-- **Pagy pagination** - Use Pagy gem with jbuilder partials for consistent pagination
-- **TypeScript strict** - Avoid `any`, prefer interfaces over types
-- **shadcn first** - Use shadcn/ui components when available
-- **Performance minded** - Database indexing, query optimization, React.memo, jbuilder caching
+## Rails Backend
 
-## Available Code Review Agents
+### Models & Concerns
 
-### Rails Routes & Controller Auditor
+Heavy use of concerns for horizontal behavior:
 
-This specialized agent helps ensure your Rails application follows DHH's RESTful conventions. Use it when you need to:
+```ruby
+# app/models/project.rb
+class Project < ApplicationRecord
+  include Archivable, Publishable, Searchable
 
-- **Review controller actions** - Ensure controllers stick to the 7 standard RESTful actions
-- **Audit routes** - Check for proper resource-based routing patterns
-- **Identify refactoring opportunities** - Find custom actions that should be extracted into resources
-- **Transform anti-patterns** - Convert verb-based methods into noun-based resources
+  belongs_to :account
+  has_many :tasks, dependent: :destroy
 
-**When to use this agent:**
+  validates :name, presence: true
+end
+```
 
-- After adding new functionality to controllers
-- When you have custom actions like `add_user`, `remove_user`, `archive`, `publish`
-- When setting up new routes and want to ensure RESTful design
-- During code reviews to maintain consistency with Rails conventions
+**Concern structure (self-contained):**
 
-**What it checks for:**
+```ruby
+# app/models/project/archivable.rb
+module Project::Archivable
+  extend ActiveSupport::Concern
 
-- Controllers with more than 7 actions (red flag)
-- Custom methods that should be separate resources
-- Proper use of nested resources
-- Clean, semantic URLs that identify resources, not actions
-- Correct HTTP verb usage for operations
+  included do
+    has_one :archive, dependent: :destroy
 
-**Example transformations:**
+    scope :archived, -> { joins(:archive) }
+    scope :active, -> { where.missing(:archive) }
+  end
 
-- `GroupsController#add_user` → `MembershipsController#create`
-- `PostsController#publish` → `PublicationsController#create`
-- `CasesController#close` → `ClosuresController#create`
-- `AccountsController#upgrade_plan` → `SubscriptionsController#create`
+  def archived?
+    archive.present?
+  end
 
-## Rails Backend Guidelines
+  def active?
+    !archived?
+  end
+
+  def archive!(user: Current.user)
+    transaction { create_archive!(user: user) } unless archived?
+  end
+
+  def unarchive!
+    archive&.destroy if archived?
+  end
+end
+```
+
+**Use enum `prefix:` / `suffix:` instead of manual predicates:**
+
+```ruby
+# GOOD: prefix generates scraping_pending?, scraping_completed?, etc.
+enum :status,
+     %w[pending processing completed failed].index_by(&:itself),
+     prefix: true,
+     validate: true
+
+project.status_completed? # auto-generated
+project.status_pending! # auto-generated
+```
+
+**Plain module when no `included` block:**
+
+If a concern only adds methods (no associations, callbacks, scopes, or class-level config), use a plain module:
+
+```ruby
+# GOOD: No included block needed — plain module
+module Project::SeoMetadata
+  def meta_title
+    meta_tag_value("title") || title
+  end
+end
+
+# BAD: ActiveSupport::Concern with no included block
+module Project::SeoMetadata
+  extend ActiveSupport::Concern
+
+  def meta_title
+    meta_tag_value("title") || title
+  end
+end
+```
+
+**Keep associations minimal — let Rails infer:**
+
+Rails resolves `class_name` and `foreign_key` automatically from the model's namespace and association name. Only specify them when the defaults are wrong.
+
+```ruby
+# GOOD: Rails infers Project::Task from has_many :tasks inside Project
+class Project < ApplicationRecord
+  has_many :tasks, dependent: :destroy
+  belongs_to :account
+end
+
+# BAD: Redundant options that Rails already infers
+class Project < ApplicationRecord
+  has_many :tasks, class_name: "Project::Task", foreign_key: :project_id, dependent: :destroy
+  belongs_to :account, class_name: "Account", foreign_key: :account_id
+end
+
+# GOOD: Specify only when the default is wrong
+belongs_to :creator, class_name: "User" # FK isn't user_id
+```
+
+**State as records (not booleans):**
+
+Instead of `archived: boolean`, create a separate record:
+
+```ruby
+# BAD: Boolean column
+class Project < ApplicationRecord
+  scope :archived, -> { where(archived: true) }
+end
+
+# GOOD: Separate record
+class Archive < ApplicationRecord
+  belongs_to :project, touch: true
+  belongs_to :user, optional: true
+  # created_at gives you when, user gives you who
+end
+
+class Project < ApplicationRecord
+  has_one :archive, dependent: :destroy
+
+  scope :archived, -> { joins(:archive) }
+  scope :active, -> { where.missing(:archive) }
+end
+```
+
+**Naming conventions:**
+
+Verb methods for actions: `project.archive!`, `project.publish`, `task.complete`
+
+Predicate methods for state: `project.archived?`, `project.active?`, `task.completed?`
+
+Bang methods (`!`) only when a non-bang counterpart exists:
+
+```ruby
+# GOOD: Bang has a non-bang counterpart
+project.archive # returns false on failure
+project.archive! # raises on failure
+
+# BAD: Bang with no counterpart
+def processing_completed!
+  update!(status: "completed")
+end
+
+# GOOD: No bang needed — it's the only version
+def complete_processing
+  update!(status: "completed")
+end
+```
+
+Concern naming (adjectives): `Archivable`, `Publishable`, `Searchable`, `Assignable`
+
+Controller naming (nouns): `Projects::ArchivesController`, `Posts::PublicationsController`
+
+**Prefer `if/else` over guard clauses for branching logic:**
+
+```ruby
+# GOOD: if/else for branching logic
+def reading_time
+  count = word_count || 0
+
+  if count < 200
+    "Less than 1 min"
+  else
+    minutes = (count / 200.0).ceil
+    "#{minutes} min read"
+  end
+end
+
+# BAD: Guard clause used as branching
+def reading_time
+  return "Less than 1 min" if (word_count || 0) < 200
+
+  minutes = ((word_count || 0) / 200.0).ceil
+  "#{minutes} min read"
+end
+```
 
 ### Controllers (DHH Style)
 
-Follow RESTful conventions with the standard seven actions:
+Follow RESTful conventions with the standard seven actions only:
 
 - `index`, `show`, `new`, `create`, `edit`, `update`, `destroy`
 
-```ruby
-class ProjectsController < ApplicationController
-  def index
-    @pagy, @projects = pagy(Project.includes(:owner))
-    render inertia: "projects/index" # Uses app/views/projects/index.json.jbuilder
-  end
+**Thin controllers, rich models:**
 
+```ruby
+# GOOD: Controller just orchestrates
+class Projects::ArchivesController < ApplicationController
   def create
-    @project = Project.new(project_params)
-
-    if @project.save
-      redirect_to @project, notice: "Project created successfully"
-    else
-      redirect_back fallback_location: projects_path, inertia: { errors: @project.errors }
-    end
+    @project = Project.find(params[:project_id])
+    @project.archive! # All logic in model
+    redirect_to projects_path, notice: "Project archived"
   end
 
-  private
-
-  def project_params
-    params.require(:project).permit(:name, :description)
+  def destroy
+    @project = Project.find(params[:project_id])
+    @project.unarchive! # All logic in model
+    redirect_to project_path(@project), notice: "Project restored"
   end
 end
 ```
 
-### Singular Resource Controllers for Custom Actions
+**RESTful resource controllers:**
 
-**CRITICAL PATTERN**: When you need custom actions beyond the standard 7, extract them into separate singular resource controllers. This keeps your code RESTful and follows DHH's philosophy.
-
-#### ❌ Bad: Custom actions in main controller
+Extract custom actions into their own resource controllers. The goal is avoiding bloated controllers with custom actions.
 
 ```ruby
+# BAD: Custom actions in main controller
 class ProjectsController < ApplicationController
-  # ... standard 7 actions ...
-
-  # ❌ Custom actions pollute the controller
-  def archive
-    @project = Project.find(params[:id])
+  def archive # Not one of the 7 standard actions
     @project.archive!
-    redirect_to projects_path
-  end
-
-  def publish
-    @project = Project.find(params[:id])
-    @project.publish!
-    redirect_to project_path(@project)
   end
 end
-```
 
-#### ✅ Good: Extract to singular resource controllers
-
-```ruby
-# app/controllers/projects/archives_controller.rb
+# GOOD: Extract to separate resource controller
 class Projects::ArchivesController < ApplicationController
   def create
     @project = Project.find(params[:project_id])
@@ -140,56 +248,73 @@ class Projects::ArchivesController < ApplicationController
     redirect_to projects_path, notice: "Project archived"
   end
 end
+```
 
-# app/controllers/projects/publications_controller.rb
-class Projects::PublicationsController < ApplicationController
-  def create
+**Choosing singular vs plural:**
+
+| Use `resource` (singular) | Use `resources` (plural)  |
+| ------------------------- | ------------------------- |
+| One instance per parent   | Many instances per parent |
+| No `:id` in URL           | `:id` in URL              |
+| `archive`, `publication`  | `memberships`, `comments` |
+
+**Controller concerns for scoping:**
+
+```ruby
+# app/controllers/concerns/project_scoped.rb
+module ProjectScoped
+  extend ActiveSupport::Concern
+
+  included { before_action :set_project }
+
+  private
+
+  def set_project
     @project = Project.find(params[:project_id])
-    @project.publish!
-    redirect_to project_path(@project), notice: "Project published"
   end
 end
 ```
 
-**Routes for singular resources:**
+**Private method formatting:**
+
+- No blank line after `private`
+- Indent all methods below `private` by 2 spaces
 
 ```ruby
-resources :projects do
-  scope module: :projects do
-    resource :archive, only: [:create] # POST /projects/:project_id/archive
-    resource :publication, only: [:create] # POST /projects/:project_id/publication
+# GOOD
+class MyController < ApplicationController
+  def index
+    # ...
+  end
+
+  private
+
+  def set_resource
+    @resource = Resource.find(params[:id])
+  end
+
+  def resource_params
+    params.require(:resource).permit(:name)
   end
 end
 ```
 
-**Benefits:**
+### Jbuilder for Inertia Props
 
-- Each controller has a single, clear responsibility
-- RESTful URLs and HTTP verbs
-- Easy to test and maintain
-- Follows Rails conventions
+**IMPORTANT:** Use jbuilder views for ALL Inertia props. Avoid inline `props:` hash in controllers.
 
-**Common Patterns:**
+With `default_render = true` and `component_path_resolver`, controllers don't need explicit `render inertia:` calls when using jbuilder views:
 
 ```ruby
-# Bulk operations
-resource :bulk_deletion, only: [:create]
-resource :bulk_approval, only: [:create]
-
-# State transitions
-resource :activation, only: %i[create destroy]
-resource :approval, only: [:create]
+# Controller — no render call needed (default_render handles it)
+class ProjectsController < ApplicationController
+  def index
+    @pagy, @projects = pagy(Project.includes(:owner))
+  end
+end
 ```
 
-### Jbuilder Views for Inertia Props
-
-This project uses **jbuilder views** to structure JSON props for Inertia.js. This approach provides better organization, caching, and separation of concerns compared to inline props.
-
-#### How It Works
-
-When you call `render inertia: "projects/index"`, Rails automatically looks for a jbuilder view at `app/views/projects/index.json.jbuilder` thanks to the `inertia_view_assigns` method in `InertiaConfiguration`.
-
-Place jbuilder files in `app/views/` matching your controller namespace:
+Place jbuilder files in `app/views/` matching controller namespace:
 
 ```
 app/views/
@@ -201,343 +326,309 @@ app/views/
     └── _pagination.json.jbuilder
 ```
 
-#### Basic Jbuilder View
+**Basic view:**
 
 ```ruby
 # app/views/projects/index.json.jbuilder
-json.projects { json.array! @projects, partial: "projects/project", as: :project }
-
+json.projects @projects, partial: "project", as: :project
 json.partial! "shared/pagination", pagy: @pagy
 ```
 
-```ruby
-# app/views/projects/_project.json.jbuilder
-json.(project, :id, :name, :description, :created_at)
-json.owner { json.(project.owner, :id, :name, :email) }
-```
-
-#### Caching with json.cache!
-
-Use `json.cache!` to cache expensive computations. Rails automatically invalidates when the model updates:
+**Caching with json.cache!:**
 
 ```ruby
 # app/views/projects/_project.json.jbuilder
-show_stats = local_assigns[:show_stats]
-
-json.cache! [project, show_stats] do
-  json.(project, :id, :name, :description)
-
-  if show_stats
-    json.task_count project.tasks.count
-    json.completion_rate project.completion_rate
-  end
+json.cache! [project, local_assigns[:show_stats]] do
+  json.(project, :id, :name, :slug, :description)
+  json.stats project.stats_data if local_assigns[:show_stats]
 end
 ```
 
-**Cache key tips:**
+**Jbuilder best practices:**
 
-- Include model instance for automatic invalidation
-- Include local variables that affect output (`[project, show_stats]`)
-- Nested `json.cache!` blocks for granular control
+- Use jbuilder for ALL controllers
+- Use partials for reusable JSON structures
+- Cache with `json.cache!` for expensive queries
+- Use `json.(model, :attr1, :attr2)` for multiple attributes
+- Use short partial paths — `"project"` not `"projects/project"` when in the same directory
+- Never use inline `props:` hash in controllers
+- Don't put business logic in jbuilder views
+- Don't N+1 queries (use `includes` in controller)
+- Don't double-nest arrays: `json.projects @projects, partial:` not `json.projects { json.array! @projects, partial: }`
 
-#### Shared Partials with Pagy Pagination
-
-The `shared/_pagination.json.jbuilder` partial works with Pagy gem:
-
-```ruby
-# app/views/shared/_pagination.json.jbuilder
-key = local_assigns[:key] ? "#{local_assigns[:key]}_pagination" : :pagination
-
-json.set! key do
-  json.page pagy.page
-  json.per_page pagy.limit
-  json.total pagy.count
-  json.total_pages pagy.last
-  json.prev_page pagy.previous
-  json.next_page pagy.next
-end
-```
-
-**Usage in controller:**
+### Routes
 
 ```ruby
-class ProjectsController < ApplicationController
-  include Pagy::Method
+Rails.application.routes.draw do
+  root "home#index"
 
-  def index
-    @pagy, @projects = pagy(Project.all, limit: 20)
-    render inertia: "projects/index"
-  end
-end
-```
+  resources :projects do
+    scope module: :projects do
+      # Singular: one per project
+      resource :archive, only: %i[create destroy]
+      resource :publication, only: [:create]
 
-**Usage in jbuilder:**
-
-```ruby
-# app/views/projects/index.json.jbuilder
-json.projects { json.array! @projects, partial: "projects/project", as: :project }
-
-# Default key (pagination)
-json.partial! "shared/pagination", pagy: @pagy
-
-# Custom key (projects_pagination)
-json.partial! "shared/pagination", pagy: @pagy, key: "projects"
-```
-
-**Frontend usage:**
-
-```tsx
-// app/frontend/pages/projects/index.tsx
-interface Props {
-  projects: Project[];
-  pagination: {
-    page: number;
-    perPage: number;
-    total: number;
-    totalPages: number;
-    prevPage: number | null;
-    nextPage: number | null;
-  };
-}
-
-export default function Index({ projects, pagination }: Props) {
-  // Use pagination data for UI
-}
-```
-
-#### Partials with Conditional Data
-
-Use `local_assigns` to make partials flexible:
-
-```ruby
-# app/views/projects/_project.json.jbuilder
-show_stats = local_assigns[:show_stats]
-show_owner = local_assigns.fetch(:show_owner, true)
-
-json.cache! [project, show_stats, show_owner] do
-  json.(project, :id, :name, :description)
-
-  json.owner project.owner, partial: "users/user", as: :user if show_owner
-
-  if show_stats
-    json.stats do
-      json.task_count project.tasks.count
-      json.completion_rate project.completion_rate
+      # Plural: many per project
+      resources :tasks, only: %i[index create destroy]
     end
   end
 end
 ```
 
-**Call with parameters:**
+**Key patterns:**
 
-```ruby
-json.projects @projects do |project|
-  json.partial! "projects/project", project: project, show_stats: true, show_owner: false
-end
-```
+- `scope module:` to nest controllers without nesting URLs
+- `param: :slug` for SEO-friendly URLs
+- Singular `resource` for one-per-parent, plural `resources` for many-per-parent
 
-#### ETags for HTTP Caching
-
-Combine jbuilder caching with HTTP ETags for maximum performance:
-
-```ruby
-class ProjectsController < ApplicationController
-  def show
-    @project = Project.find(params[:id])
-
-    # ETag includes model and request type
-    if stale?(strong_etag: [@project, request.inertia?])
-      render inertia: "projects/show" # Uses jbuilder view
-    end
-  end
-end
-```
-
-**Benefits:**
-
-- Browser caches entire response
-- Rails sends 304 Not Modified if unchanged
-- Works with Inertia.js partial reloads
-
-#### Jbuilder Best Practices
-
-**Do:**
-
-- ✅ Use jbuilder views instead of inline props for better organization
-- ✅ Use partials for reusable JSON structures
-- ✅ Cache with `json.cache!` for expensive queries
-- ✅ Include cache keys that affect output
-- ✅ Use `json.(model, :attr1, :attr2)` for multiple attributes
-- ✅ Keep jbuilder views focused on data presentation
-- ✅ Mirror controller namespaces in view directories
-
-**Don't:**
-
-- ❌ Put business logic in jbuilder views (belongs in models)
-- ❌ N+1 queries (use `includes` in controller)
-- ❌ Forget to cache nested associations
-- ❌ Mix inline props and jbuilder in same controller
-
-### Models
-
-- Use concerns for shared behavior
-- Focus on data relationships and validations
-- Use scopes for common queries
-- Validate data integrity at model level
-
-```ruby
-class Project < ApplicationRecord
-  belongs_to :owner, class_name: "User"
-  has_many :tasks, dependent: :destroy
-
-  validates :name, presence: true, length: { maximum: 100 }
-
-  scope :active, -> { where(archived: false) }
-  scope :recent, -> { order(created_at: :desc) }
-end
-```
-
-### Database Best Practices
+### Database Patterns
 
 - Add indexes for foreign keys and frequently queried columns
 - Use `includes`, `joins`, `select` for query optimization
-- Keep migrations reversible when possible
+- Use `touch: true` for cache invalidation
 
-## React Frontend Guidelines
+**Prefer ActiveRecord query interface over raw SQL:**
 
-### Component Structure
+```ruby
+# GOOD: Range syntax
+where(started_at: 30.minutes.ago..)
+where(score: ..100)
+where(created_at: 1.week.ago..1.day.ago)
 
-```tsx
-// app/frontend/pages/projects/index.tsx
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Link } from '@inertiajs/react'
-
-interface Props {
-  projects: Project[];
-  currentPage: number;
-  totalPages: number;
-}
-
-export default function Index({ projects, currentPage, totalPages }: Props) {
-  return (
-    <div className="container mx-auto p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Projects</h1>
-        <Button asChild>
-          <Link href="//rojects/new">New Project</a>
-        </Button>
-      </div>
-
-      <div className="grid gap-4">
-        {projects.map((project) => (
-          <Card key={project.id} className="p-4">
-            <h2 className="text-xl font-semibold">{project.name}</h2>
-            <p className="text-muted-foreground">{project.description}</p>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
+# BAD: Raw SQL for simple comparisons
+where("started_at > ?", 30.minutes.ago)
 ```
 
-### React Patterns
+Raw SQL is fine for genuinely complex queries (subqueries, database-specific functions).
 
-- Use functional components exclusively
-- Keep components small and focused
-- Extract reusable logic into custom hooks
-- Use composition over inheritance
-- Implement proper TypeScript typing
+### Background Jobs (SolidQueue)
+
+**Shallow jobs, rich models:**
+
+```ruby
+# app/jobs/process_project_job.rb
+class ProcessProjectJob < ApplicationJob
+  def perform(project)
+    project.process # Model does the work
+  end
+end
+```
+
+**`_later` and `_now` convention:**
+
+```ruby
+module Project::Processable
+  def process_later
+    ProcessProjectJob.perform_later(self)
+  end
+
+  def process_now
+    # actual processing logic
+  end
+end
+```
+
+### Validations & Error Handling
+
+**Minimal validations:**
+
+```ruby
+class Project < ApplicationRecord
+  validates :name, presence: true # Only what's needed
+end
+```
+
+**Let it crash (bang methods):**
+
+```ruby
+def create
+  @comment = @project.comments.create!(comment_params) # Raises on failure
+end
+```
+
+---
+
+## React & Frontend
+
+### File Naming (CRITICAL)
+
+**All frontend files use kebab-case (including folders):**
+
+```
+app/frontend/pages/projects/components/project-card.tsx     # GOOD
+app/frontend/pages/projects/components/ProjectCard.tsx       # BAD
+```
+
+When renaming files, use `git mv` to preserve history (especially on case-insensitive filesystems).
+
+### Resource-Based Architecture
+
+Frontend mirrors Rails resources, NOT abstract features:
+
+```
+app/frontend/pages/
+├── projects/                 # Resource: Projects
+│   ├── index.tsx            # ProjectsController#index
+│   ├── show.tsx             # ProjectsController#show
+│   ├── new.tsx              # ProjectsController#new
+│   ├── edit.tsx             # ProjectsController#edit
+│   └── components/          # Components ONLY for this resource
+│       ├── card.tsx
+│       └── form.tsx
+├── tasks/                   # Resource: Tasks
+└── memberships/             # Resource: Memberships
+```
+
+**Key principles:**
+
+- Each resource folder is self-contained
+- Components in resource folders are NOT shared
+- Extract to `/app/frontend/components` only when used by 2+ resources
+
+### Component Extraction Rules
+
+1. **Start in the resource** - Build components in the resource folder first
+2. **Extract when needed** - Only when 2+ resources need the same component
+3. **Make it generic** - Remove resource-specific logic when extracting
+4. **Place in shared folder** - Move to `/components/base/`
+
+### Shadcn Component Usage
+
+IMPORTANT: **DO NOT modify `/components/ui/` files** - these are Shadcn defaults.
+
+```tsx
+// Use composition
+<Card>
+  <CardHeader>
+    <CardTitle>Settings</CardTitle>
+  </CardHeader>
+  <CardContent>
+    <Button variant="outline">Save</Button>
+  </CardContent>
+</Card>
+
+// Use asChild for custom elements
+<Button asChild>
+  <Link href={projects_path()}>View Projects</Link>
+</Button>
+```
+
+If you need custom behavior, create a wrapper in `/components/base/`.
 
 ### State Management
 
-- Use useState for local component state
-- Use useReducer for complex state logic
-- Use Context API for shared state
-- Keep state close to where it's used
-- **Avoid prop drilling** - Use Context when passing data through multiple levels
-
-#### Avoiding Prop Drilling with Context
-
-When you find yourself passing props through multiple component layers just to reach a deeply nested child, use Context instead:
+**Avoid Context API** - rely on backend state via Inertia.js shared props:
 
 ```tsx
-// ❌ Bad: Prop drilling through multiple levels
-function App() {
-  const [user, setUser] = useState<User>();
-  return <Dashboard user={user} setUser={setUser} />;
-}
-
-function Dashboard({ user, setUser }) {
-  return <Sidebar user={user} setUser={setUser} />;
-}
-
-function Sidebar({ user, setUser }) {
-  return <UserProfile user={user} setUser={setUser} />;
-}
-
-// ✅ Good: Using Context for cross-cutting concerns
-const UserContext = createContext<UserContextType | undefined>(undefined);
-
-export function UserProvider({ children }) {
-  const [user, setUser] = useState<User>();
-  return <UserContext.Provider value={{ user, setUser }}>{children}</UserContext.Provider>;
-}
-
-export function useUser() {
-  const context = useContext(UserContext);
-  if (!context) {
-    throw new Error('useUser must be used within UserProvider');
-  }
-  return context;
-}
-
-// Clean component hierarchy
-function App() {
-  return (
-    <UserProvider>
-      <Dashboard />
-    </UserProvider>
-  );
-}
-
-function Dashboard() {
-  return <Sidebar />;
-}
-
-function Sidebar() {
-  return <UserProfile />;
-}
-
-function UserProfile() {
-  const { user, setUser } = useUser();
-  // Direct access to user data without prop drilling
-}
+// GOOD: Shared props via Inertia
+const { currentPath } = usePage<SharedProps>().props;
 ```
 
-**When to use Context:**
+### Inertia.js Forms
 
-- Data needed by many components at different nesting levels (user, theme, locale)
-- Avoiding "prop plumbing" through intermediate components
-- Cross-cutting concerns that many components need access to
+**Use `<Form>` for most forms** (preferred):
 
-**When NOT to use Context:**
+```tsx
+import { Form } from '@inertiajs/react';
+import { projects_path } from '@/rails/routes';
 
-- Simple parent-child relationships (just use props)
-- Frequently changing data that would cause many re-renders
-- Component-specific state that doesn't need to be shared
+<Form method="post" action={projects_path()}>
+  {({ errors, processing }) => (
+    <>
+      <input type="text" name="name" />
+      {errors.name && <span>{errors.name}</span>}
+      <button type="submit" disabled={processing}>
+        Create
+      </button>
+    </>
+  )}
+</Form>;
+```
 
-### Performance Optimization
+**Use `useForm` only for programmatic control** (dynamic validation, multi-step forms):
 
-- Implement proper memoization (useMemo, useCallback)
-- Use React.memo for expensive components
-- Implement lazy loading where appropriate
-- Use proper key props in lists
+```tsx
+const { data, setData, post, processing, errors } = useForm({ email: '' });
+```
+
+**Navigation with js-routes:**
+
+```tsx
+import { router } from '@inertiajs/react';
+import { projects_path, project_path } from '@/rails/routes';
+
+router.visit(projects_path());
+projects_path({ q: 'rails', page: 2 }); // "/projects?q=rails&page=2"
+```
+
+### When NOT to Use useEffect
+
+Per [React docs](https://react.dev/learn/you-might-not-need-an-effect):
+
+| Anti-pattern                   | Better approach                      |
+| ------------------------------ | ------------------------------------ |
+| Computing derived data         | Calculate during render or `useMemo` |
+| Event-triggered logic          | Keep in event handlers               |
+| Fetching on user action        | Trigger in handler, not Effect       |
+| Resetting state on prop change | Use `key` prop to remount            |
+| Chained Effects                | Calculate everything in one place    |
+
+```tsx
+// BAD: Effect syncs state
+const [items, setItems] = useState([]);
+const [filtered, setFiltered] = useState([]);
+useEffect(() => {
+  setFiltered(items.filter((i) => i.active));
+}, [items]);
+
+// GOOD: Compute during render
+const filtered = useMemo(() => items.filter((i) => i.active), [items]);
+```
+
+**Valid useEffect uses:**
+
+- Fetching data on mount (with cleanup)
+- Setting up subscriptions/event listeners (with cleanup)
+- Syncing with external systems (DOM, third-party libs)
+
+### Styling & Text Colors
+
+**Prefer semantic colors:**
+
+```tsx
+text - foreground; // Primary text
+text - muted - foreground; // Secondary text
+text - destructive; // Error states
+text - primary; // Brand color highlights
+```
+
+**For sentiment/status** (when semantically appropriate):
+
+```tsx
+text - green - 600; // Positive sentiment, success
+text - red - 600; // Negative sentiment, errors
+text - yellow - 600; // Warning states
+```
+
+**Avoid** hard-coded grays — prefer semantic colors (`text-muted-foreground` over `text-gray-400`).
+
+### Error Handling
+
+Use `trackError()` instead of `console.error()`:
+
+```typescript
+import { trackError } from '@/lib/error-tracking';
+
+// GOOD: Tracks to Sentry with auto-detected context
+trackError('Failed to load data', error);
+
+// BAD: Only logs to console
+console.error('Failed to load data', error);
+```
+
+---
 
 ## TypeScript Guidelines
-
-### Type System
 
 ```typescript
 // Prefer interfaces for object shapes
@@ -549,7 +640,6 @@ interface User {
 
 // Use type for unions and intersections
 type Status = 'pending' | 'active' | 'archived';
-type UserWithStatus = User & { status: Status };
 
 // Avoid any, use unknown for truly unknown types
 function processData(data: unknown): void {
@@ -559,480 +649,153 @@ function processData(data: unknown): void {
 }
 ```
 
-### Naming Conventions
+**Naming conventions:**
 
 - PascalCase for types and interfaces
 - camelCase for variables and functions
 - UPPER_CASE for constants
 - Descriptive names with auxiliary verbs (isLoading, hasError)
 
-## Inertia.js Integration
+---
 
-### Page Structure
+## Testing
 
-Mirror Rails controller structure in React pages:
+**Minitest, not RSpec.**
 
-```
-app/frontend/pages/
-├── projects/
-│   ├── index.tsx    # projects#index
-│   ├── show.tsx     # projects#show
-│   ├── new.tsx      # projects#new
-│   └── edit.tsx     # projects#edit
-└── users/
-    └── index.tsx    # users#index
-```
+**Don't test the framework:**
 
-### Navigation with JS Routes
+```ruby
+# BAD: Testing that Rails associations work
+test "belongs to account" do
+  assert_equal accounts(:one), projects(:one).account
+end
 
-This project uses `js-routes` gem to generate type-safe route helpers from Rails routes. Routes are automatically generated to `app/javascript/routes.js` and `routes.d.ts`.
-
-```tsx
-import { router } from '@inertiajs/react';
-import { projects_path, project_path, edit_project_path } from '@/rails/routes';
-
-// Type-safe route helpers
-const projectsUrl = projects_path(); // "/projects"
-const projectUrl = project_path(projectId); // "/projects/123"
-const editProjectUrl = edit_project_path(projectId); // "/projects/123/edit"
-
-// With query parameters
-const searchUrl = projects_path({ q: 'rails', page: 2 }); // "/projects?q=rails&page=2"
-
-// Programmatic navigation with js-routes
-router.visit(projects_path());
-router.post(projects_path(), data);
-
-// Link component with js-routes
-import { Link } from '@inertiajs/react';
-<Link href={projects_path()}>View Projects</Link>;
+# GOOD: Test business logic
+test "calculates completion rate from tasks" do
+  assert_in_delta 75.0, projects(:one).completion_rate, 0.01
+end
 ```
 
-**Generating Routes:**
+**What to test:** Business logic, scopes with complex logic, custom validations, model methods that transform/aggregate data, edge cases.
 
-```bash
-# Generate routes (done automatically in development and CI)
-bundle exec rake js:routes
+**What NOT to test:** Framework features (associations, validations, delegated_type), database indexes, that `belongs_to` works.
 
-# Routes are generated to:
-# - app/javascript/routes.js (JavaScript implementation)
-# - app/javascript/routes.d.ts (TypeScript definitions)
-```
-
-The `@/rails` alias in Vite config maps to `app/javascript/`, making imports clean and consistent.
-
-### Forms with Inertia
-
-```tsx
-import { useForm } from '@inertiajs/react';
-
-function ProjectForm() {
-  const { data, setData, post, processing, errors } = useForm({
-    name: '',
-    description: '',
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    post('/projects');
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <input value={data.name} onChange={(e) => setData('name', e.target.value)} />
-      {errors.name && <span>{errors.name}</span>}
-      <button disabled={processing}>Submit</button>
-    </form>
-  );
-}
-```
-
-## shadcn/ui & Styling Guidelines
-
-### Component Usage
-
-Always check shadcn/ui documentation for latest patterns:
-
-```tsx
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-// Use composition pattern
-<Card>
-  <CardHeader>
-    <CardTitle>Settings</CardTitle>
-  </CardHeader>
-  <CardContent>
-    <Input placeholder="Enter name" />
-    <Button variant="outline">Save</Button>
-  </CardContent>
-</Card>
-
-// Use asChild for custom elements
-<Button asChild>
-  <a href="/login">Sign In</a>
-</Button>
-```
-
-### Tailwind CSS
-
-- Use utility-first approach
-- Mobile-first responsive design
-- Dark mode support
-- Semantic color naming
-
-```tsx
-<div className="container mx-auto p-4 md:p-6 lg:p-8">
-  <h1 className="text-foreground text-2xl font-bold md:text-3xl">Title</h1>
-  <p className="text-muted-foreground mt-2">Description text</p>
-</div>
-```
-
-## Testing Guidelines
-
-### Rails Testing
+**Controller test standards:**
 
 ```ruby
 require "test_helper"
 
-class ProjectTest < ActiveSupport::TestCase
-  test "should not save project without name" do
-    project = Project.new
-    assert_not project.save
-    assert_includes project.errors[:name], "can't be blank"
+class ProjectsControllerTest < ActionDispatch::IntegrationTest
+  test "index renders projects" do
+    get projects_path
+
+    assert_response :success
   end
-end
-```
 
-### System Tests
+  test "create with valid params adds project" do
+    assert_difference -> { Project.count } do
+      post projects_path, params: { project: { name: "New Project" } }, as: :json
+    end
 
-```ruby
-require "application_system_test_case"
-
-class ProjectsTest < ApplicationSystemTestCase
-  test "creating a project" do
-    visit projects_url
-    click_on "New Project"
-
-    fill_in "Name", with: "Test Project"
-    click_on "Create Project"
-
-    assert_text "Project created successfully"
+    assert_redirected_to project_path(Project.last)
   end
-end
-```
 
-## Security Best Practices
-
-- Use strong parameters in controllers
-- Never expose sensitive data in logs
-- Implement CSRF protection
-- Validate and sanitize user input
-- Use encrypted credentials for secrets
-
-## Developer Tools & Utilities
-
-### Layout Resolver
-
-This project uses a **layout resolver** to automatically assign layouts based on page paths, avoiding duplication between client-side and SSR rendering.
-
-**How it works:**
-
-```typescript
-// app/frontend/lib/layout-resolver.ts
-export default function resolvePageLayout(name: string, page: any): any {
-  if (page.default.layout) {
-    return page; // Use explicit layout if specified
-  }
-
-  page.default.layout = (pageComponent: any) => {
-    const pageProps = pageComponent.props || {};
-
-    // Can add conditional logic here:
-    // if (name.startsWith('admin/')) return AdminLayout
-
-    return createElement(ApplicationLayout, { ...pageProps }, pageComponent);
-  };
-
-  return page;
-}
-```
-
-**Usage in entrypoint:**
-
-```typescript
-// app/frontend/entrypoints/inertia.ts
-import resolvePageLayout from '../lib/layout-resolver';
-
-createInertiaApp({
-  resolve: (name): any => {
-    const pages = import.meta.glob<any>('../pages/**/*.tsx', { eager: true });
-    const page = pages[`../pages/${name}.tsx`];
-    return resolvePageLayout(name, page);
-  },
-  // ...
-});
-```
-
-**Benefits:**
-
-- Automatic layout assignment based on page path
-- Single source of truth for layout logic
-- Works with both client-side and SSR
-- Easy to extend with custom logic
-
-### PgSync - Production Database Sync
-
-This project includes **pgsync** for safely syncing production data to development environments.
-
-**Configuration:**
-
-```yaml
-# .pgsync.yml
-from: $(echo $DATABASE_URL)?sslmode=require
-to: postgres://localhost:5432/starter_development
-
-exclude:
-  - active_storage_attachments
-  - active_storage_blobs
-  - ahoy_events
-  - ahoy_visits
-  - schema_migrations
-
-# Data anonymization
-data_rules:
-  email: unique_email
-  phone: unique_phone
-  '*password*': null
-  '*token*': null
-  '*secret*': null
-```
-
-**Usage:**
-
-```bash
-# Set DATABASE_URL to production database
-export DATABASE_URL=postgres://user:pass@host:5432/dbname
-
-# Sync all tables (respecting excludes and anonymization)
-bin/sync_prod
-
-# Or inline:
-DATABASE_URL=postgres://... bin/sync_prod
-```
-
-**Safety features:**
-
-- Data anonymization for sensitive fields
-- Excluded tables (sessions, logs, analytics)
-- Truncates before sync to avoid duplicates
-- Sequential jobs to prevent deadlocks
-
-### bin/check - Pre-commit Quality Checks
-
-Run all quality checks before committing:
-
-```bash
-bin/check
-```
-
-This script runs:
-
-1. `npm run format:check` - Code formatting
-2. `bin/rails test` - Test suite
-3. `bin/rubocop` - Ruby linting
-
-**Recommended workflow:**
-
-```bash
-# Make changes
-git add .
-
-# Run checks
-bin/check
-
-# If all pass, commit
-git commit -m "Your message"
-```
-
-### Ahoy + Inertia Integration
-
-This project uses **Ahoy** for analytics with special handling for Inertia.js requests.
-
-**How it works:**
-
-The `Analytics::Providers::Ahoy` concern automatically skips duplicate visit tracking for Inertia requests:
-
-```ruby
-# app/controllers/concerns/analytics/providers/ahoy.rb
-def skip_ahoy_tracking?
-  return false unless inertia_request?
-
-  visit_token = cookies[:ahoy_visit]
-  return false unless visit_token
-
-  visit = ::Ahoy::Visit.find_by(visit_token: visit_token)
-  return false unless visit
-
-  # Only skip if visit is still within the duration window
-  (Time.current - visit.started_at) < ::Ahoy.visit_duration
-end
-```
-
-**Why this matters:**
-
-- Inertia.js uses AJAX for subsequent page loads
-- Without this, each Inertia navigation creates a new visit
-- With this, visits are only tracked on initial page load or after expiry
-- Provides accurate visitor analytics
-
-**Tracking custom events:**
-
-```ruby
-class ProjectsController < ApplicationController
-  def create
-    @project = Project.new(project_params)
-
-    if @project.save
-      track("project_created", project_id: @project.id)
-      redirect_to @project
+  test "create with invalid params does not add project" do
+    assert_no_difference -> { Project.count } do
+      post projects_path, params: { project: { name: "" } }, as: :json
     end
   end
 end
 ```
 
-### Additional Development Gems
+**Standards:**
 
-**letter_opener** (development):
+- Controller tests are integration tests (`ActionDispatch::IntegrationTest`)
+- GET actions assert success and don't inspect JSON shape
+- POST/PATCH tests use `as: :json` to match Inertia param format
+- Write/update actions have both valid and invalid param tests
+- Use `assert_difference` / `assert_no_difference` for create/destroy
 
-- Opens emails in browser instead of sending
-- Automatic with Rails development mode
-- View at `/letter_opener` when emails are sent
+**Fixtures over factories:**
 
-**vcr** (test):
-
-- Records HTTP interactions for tests
-- Prevents hitting external APIs in tests
-- Fast and deterministic test runs
-
-```ruby
-# test/test_helper.rb
-VCR.configure do |config|
-  config.cassette_library_dir = "test/vcr_cassettes"
-  config.hook_into :webmock
-end
-
-# In tests
-VCR.use_cassette("api_call") do
-  # HTTP request is recorded/replayed
-  response = HTTParty.get("https://api.example.com/data")
-end
+```yaml
+# test/fixtures/projects.yml
+one:
+  name: 'First Project'
+  account: one
+  status: active
 ```
 
-## Pre-Commit Checklist
+Reference fixtures inline — don't create instance variables just to reference them.
+
+---
+
+## Available Code Review Agents
+
+### Rails Routes & Controller Auditor
+
+Use when you need to review controllers and routes for DHH's RESTful conventions:
+
+- Controllers with more than 7 actions (red flag)
+- Custom methods that should be separate resources
+- Proper use of nested resources
+
+**Example transformations:**
+
+- `GroupsController#add_user` → `MembershipsController#create`
+- `PostsController#publish` → `PublicationsController#create`
+- `CasesController#close` → `ClosuresController#create`
+
+---
+
+## Environment & Workflow
+
+**IMPORTANT: Never commit or push changes unless explicitly asked by the user.**
+
+**Package Manager:** Use `yarn` (not npm) for JavaScript packages.
 
 ```bash
-# Run tests
-bundle exec rails test
-
-# Check Ruby style
-bundle exec rubocop
-
-# Format code
-yarn prettier --write .
-
-# Type checking
-yarn tsc --noEmit
-
-# Build check
-yarn build
-```
-
-## Common Commands
-
-```bash
-# Setup
-bundle install
-yarn install
-
 # Development
 bin/dev                              # Start development server
 bundle exec rails console            # Rails console
-bundle exec rails generate model     # Generate model
 bundle exec rails db:migrate         # Run migrations
 
-# Testing
+# Testing & Quality
 bundle exec rails test               # Run all tests
-bundle exec rails test test/models   # Run specific tests
-
-# Code quality
 bundle exec rubocop                  # Ruby linting
 yarn prettier --check .              # Check formatting
-yarn tsc                             # TypeScript checking
 bin/check                            # Run all quality checks
 
 # Database
 bin/sync_prod                        # Sync production data (requires DATABASE_URL)
 ```
 
-## Common Patterns to Follow
+### bin/check - Pre-commit Quality Checks
 
-### Controllers & Routes
+```bash
+bin/check
+```
 
-✅ Use Inertia.js for all routing (no React Router)
-✅ Follow RESTful conventions with 7 standard actions
-✅ Extract custom actions into singular resource controllers
-✅ Use jbuilder views for Inertia props (not inline props)
+Runs: formatting check, test suite, rubocop. Always run before committing.
 
-### Data & Performance
+---
 
-✅ Use Pagy for pagination with jbuilder partials
-✅ Cache jbuilder views with `json.cache!`
-✅ Add database indexes on foreign keys
-✅ Use `includes` to prevent N+1 queries
-✅ Implement ETags for HTTP caching
+## Quick Reference
 
-### Frontend
-
-✅ Use shadcn/ui components when available
-✅ Implement proper TypeScript types (avoid `any`)
-✅ Use layout resolver for automatic layout assignment
-✅ Context API to avoid prop drilling
-
-### Testing & Quality
-
-✅ Write tests for critical paths
-✅ Run bin/check before committing
-✅ Use VCR for HTTP interactions in tests
-✅ Handle errors gracefully
-
-## Anti-Patterns to Avoid
-
-### Controllers & Routes
-
-❌ Custom actions in main resource controllers (extract to singular resources)
-❌ Controllers with more than 7 actions
-❌ Inline props in controllers (use jbuilder views)
-❌ Returning JSON directly from controllers (use `render inertia:`)
-
-### Data & Performance
-
-❌ Missing database indexes on foreign keys
-❌ N+1 queries (use `includes`, `joins`)
-❌ Forgetting to cache expensive jbuilder computations
-❌ Business logic in jbuilder views (belongs in models)
-
-### Frontend
-
-❌ Using React Router instead of Inertia
-❌ Using `any` type in TypeScript
-❌ Class components (use functional)
-❌ Prop drilling (use Context or composition)
-❌ Custom CSS when Tailwind utilities exist
-
-### Security & Data
-
-❌ Exposing sensitive data in responses
-❌ Syncing production data without anonymization
-❌ Committing secrets to repository
+| Prefer                                  | Over                                             |
+| --------------------------------------- | ------------------------------------------------ |
+| Jbuilder views for all Inertia props    | Inline `props:` hash in controllers              |
+| Model concerns for business logic       | Service objects, interactors, commands           |
+| 7 standard controller actions           | Custom controller actions (extract to resources) |
+| `kebab-case.tsx` for frontend files     | `PascalCase.tsx` filenames                       |
+| Inertia.js for routing                  | React Router                                     |
+| Shadcn components (don't modify `/ui/`) | Custom components when shadcn exists             |
+| `if/else` for branching                 | Guard clauses for branching logic                |
+| Range syntax `.where(col: val..)`       | Raw SQL for simple comparisons                   |
+| Let Rails infer associations            | Redundant `class_name:`, `foreign_key:`          |
+| Enum `prefix:`/`suffix:` for predicates | Manual predicate methods                         |
+| Fixtures in tests                       | Factory patterns                                 |
+| `trackError()` for errors               | `console.error()`                                |
+| `yarn` for packages                     | `npm`                                            |
+| Plain module when no `included` block   | `ActiveSupport::Concern` without `included`      |
+| `<Form>` component for forms            | `useForm` for simple forms                       |

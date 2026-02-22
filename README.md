@@ -9,8 +9,9 @@ A modern, production-ready full-stack starter kit for building SaaS applications
 - **Inertia.js** for seamless SPA experience without the API complexity
 - **Shadcn/UI** components with Tailwind CSS v4
 - **Vite** for lightning-fast HMR and builds
-- **Devise** authentication with optional Google OAuth
-- **Sidekiq** + Sidekiq-Cron for background jobs
+- **SolidQueue** for background jobs
+- **SolidCache** for caching
+- **SolidCable** for Action Cable
 - **Ahoy** for analytics tracking
 - **Paper Trail** for audit logs
 - **Sentry** for error tracking
@@ -41,14 +42,13 @@ echo 'eval "$(mise activate zsh)"' >> ~/.zshrc    # for zsh
 You'll also need these installed on your system:
 
 - PostgreSQL 14+ (check with `psql --version`)
-- Redis 6+ (check with `redis-server --version`)
 
 ```bash
 # macOS
-brew install postgresql@14 redis
+brew install postgresql@14
 
 # Ubuntu/Debian
-sudo apt-get install postgresql postgresql-client redis-server
+sudo apt-get install postgresql postgresql-client
 ```
 
 ## 🎯 Getting Started - Step by Step
@@ -123,10 +123,8 @@ DATABASE_URL = "postgres://localhost/my_custom_db"
 ### Step 4: Set Up the Database
 
 ```bash
-# Create and migrate the database
-bundle exec rails db:create
-bundle exec rails db:migrate
-bundle exec rails db:seed
+# Create database, load schemas, and seed
+bundle exec rails db:setup
 
 # You should see: "Seed data created successfully!"
 ```
@@ -134,7 +132,7 @@ bundle exec rails db:seed
 ### Step 5: Start the Development Server
 
 ```bash
-# Start Rails, Vite, and Sidekiq
+# Start Rails, Vite, and SolidQueue
 ./bin/dev
 
 # Your app is now running at http://localhost:3000
@@ -225,41 +223,6 @@ To share credentials with your team:
    rails credentials:show --environment development
    ```
 
-## 🔐 Setting Up Google OAuth (Optional)
-
-### Step 1: Create a Google Cloud Project
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the "Google+ API" for your project
-
-### Step 2: Create OAuth 2.0 Credentials
-
-1. Go to "APIs & Services" → "Credentials"
-2. Click "Create Credentials" → "OAuth client ID"
-3. Choose "Web application"
-4. Add authorized JavaScript origins:
-   - `http://localhost:3000` (development)
-   - `https://yourdomain.com` (production)
-5. Add authorized redirect URIs:
-   - `http://localhost:3000/users/auth/google_oauth2/callback` (development)
-   - `https://yourdomain.com/users/auth/google_oauth2/callback` (production)
-6. Click "Create"
-
-### Step 3: Configure Your Application
-
-```bash
-# Add to your .env file
-GOOGLE_CLIENT_ID=your_client_id_here
-GOOGLE_CLIENT_SECRET=your_client_secret_here
-```
-
-### Step 4: Test OAuth Login
-
-1. Restart your Rails server: `./bin/dev`
-2. Visit http://localhost:3000
-3. You should now see a "Sign in with Google" option on the login page
-
 ## 📧 Setting Up Email with Resend
 
 1. Sign up for a free account at [Resend](https://resend.com)
@@ -302,7 +265,7 @@ your-app/
 ├── app/
 │   ├── controllers/
 │   │   └── concerns/
-│   │       ├── breadcrumbs.rb        # Breadcrumb DSL
+│   │       ├── breadcrumbable.rb     # Breadcrumb DSL
 │   │       ├── react_layout.rb       # Layout selection
 │   │       └── inertia_configuration.rb
 │   ├── models/
@@ -351,9 +314,9 @@ The starter includes three layouts:
 # app/controllers/dashboard_controller.rb
 class DashboardController < ApplicationController
   react_layout "workspace"
-  with_breadcrumb label: "Dashboard", href: -> { dashboard_path }
 
   def show
+    breadcrumb "Dashboard"
     render inertia: "dashboard/show", props: { stats: { users: User.count } }
   end
 end
@@ -381,20 +344,49 @@ resource :dashboard
 
 ### Using Breadcrumbs
 
-Breadcrumbs are automatically displayed in the WorkspaceLayout header:
+Breadcrumbs are server-driven and automatically displayed in the WorkspaceLayout header. Call `breadcrumb(text, href)` in your controller actions — the last item (no `href`) renders as plain text, others as links:
 
 ```ruby
 class ProjectsController < ApplicationController
   react_layout "workspace"
 
-  # Class-level breadcrumb (applies to all actions)
-  with_breadcrumb label: "Projects", href: -> { projects_path }
-
   def show
     @project = Project.find(params[:id])
-    # Instance-level breadcrumb (specific to this action)
-    with_breadcrumb(label: @project.name)
-    render inertia: "projects/show"
+
+    breadcrumb "Projects", projects_path
+    breadcrumb @project.name
+  end
+end
+```
+
+For nested resources, use `before_action` to build a shared prefix:
+
+```ruby
+class Projects::TasksController < ApplicationController
+  react_layout "workspace"
+  before_action :set_project
+  before_action :set_base_breadcrumbs
+
+  def index
+    breadcrumb "Tasks"
+  end
+
+  def show
+    @task = @project.tasks.find(params[:id])
+
+    breadcrumb "Tasks", project_tasks_path(@project)
+    breadcrumb @task.title
+  end
+
+  private
+
+  def set_project
+    @project = Project.find(params[:project_id])
+  end
+
+  def set_base_breadcrumbs
+    breadcrumb "Projects", projects_path
+    breadcrumb @project.name, project_path(@project)
   end
 end
 ```
@@ -440,3 +432,43 @@ export default function Index({ projects, pagination }: Props) {
   );
 }
 ```
+
+## 🤝 Contributing to the Starter Kit
+
+If you're improving the starter kit itself (not building an app from it), you don't need to clone or rename anything. Just work directly in the repo.
+
+### Quick Setup
+
+```bash
+# Install tool versions
+mise install && mise trust
+
+# Install dependencies
+bundle install && yarn install
+
+# Set up the database
+bundle exec rails db:setup
+
+# Start the dev server
+bin/dev
+```
+
+The app runs at http://localhost:3000.
+
+### Before Committing
+
+Always run the quality checks:
+
+```bash
+bin/check
+```
+
+This runs Prettier formatting, the test suite, and Rubocop. All three must pass.
+
+### Guidelines
+
+- Follow the conventions in `CLAUDE.md` — it's the source of truth for patterns and architecture decisions
+- Use jbuilder views for Inertia props, not inline `props:` in controllers
+- Keep controllers to the 7 standard RESTful actions
+- Use `kebab-case` for all frontend filenames
+- Run `bin/check` before every commit
