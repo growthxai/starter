@@ -8,10 +8,4 @@
 #     MovieGenre.find_or_create_by!(name: genre_name)
 #   end
 
-# Create example user
-User.find_or_create_by!(email: "admin@example.com") do |user|
-  user.password = "password123"
-  user.password_confirmation = "password123"
-end
-
 puts "Seed data created successfully!"

@@ -7,9 +7,6 @@ class CreateAhoyVisitsAndEvents < ActiveRecord::Migration[8.0]
       # the rest are recommended but optional
       # simply remove any you don't want
 
-      # user
-      t.references :user, type: :uuid
-
       # standard
       t.string :ip
       t.text :user_agent
@@ -49,7 +46,6 @@ class CreateAhoyVisitsAndEvents < ActiveRecord::Migration[8.0]
 
     create_table :ahoy_events, id: :uuid do |t|
       t.references :visit, type: :uuid
-      t.references :user, type: :uuid
 
       t.string :name
       t.jsonb :properties
