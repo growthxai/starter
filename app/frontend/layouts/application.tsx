@@ -3,14 +3,8 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import React from 'react';
 import Flash from '../components/flash';
 
-interface User {
-  name: string;
-  email: string;
-}
-
 interface LayoutProps {
   children: React.ReactNode;
-  currentUser?: User;
   flash: {
     notice?: string;
     error?: string;

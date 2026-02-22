@@ -32,10 +32,8 @@ export default function Show({ title, content, timestamp }: Props) {
               <div className="bg-muted rounded-lg p-4">
                 <p className="mb-2 text-sm font-medium">Technical Details:</p>
                 <ul className="text-muted-foreground space-y-1 text-sm">
-                  <li>• Using HeadlessModal directly with shadcn Dialog</li>
-                  <li>• The controller uses `render inertia_modal`</li>
-                  <li>• URL updates when using `navigate={true}` prop</li>
-                  <li>• Can be bookmarked and shared</li>
+                  <li>• Using HeadlessModal with shadcn Dialog</li>
+                  <li>• Props come from jbuilder view</li>
                   <li>• Timestamp: {timestamp}</li>
                 </ul>
               </div>

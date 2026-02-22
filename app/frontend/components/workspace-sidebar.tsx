@@ -1,7 +1,6 @@
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -14,16 +13,7 @@ import { root_path } from '@/rails/routes';
 import { Link, usePage } from '@inertiajs/react';
 import { Home } from 'lucide-react';
 
-interface User {
-  name: string;
-  email: string;
-}
-
-interface WorkspaceSidebarProps {
-  currentUser?: User;
-}
-
-export default function WorkspaceSidebar({ currentUser }: WorkspaceSidebarProps) {
+export default function WorkspaceSidebar() {
   const { currentPath } = usePage<{ currentPath: string }>().props;
 
   const menuItems = [
@@ -61,20 +51,6 @@ export default function WorkspaceSidebar({ currentUser }: WorkspaceSidebarProps)
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
-      {currentUser && (
-        <SidebarFooter className="border-t p-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium">
-              {currentUser.name?.charAt(0)?.toUpperCase() || 'U'}
-            </div>
-            <div className="flex flex-col text-sm">
-              <span className="font-medium">{currentUser.name}</span>
-              <span className="text-muted-foreground text-xs">{currentUser.email}</span>
-            </div>
-          </div>
-        </SidebarFooter>
-      )}
     </Sidebar>
   );
 }

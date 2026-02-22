@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { home_show_path, root_path, sidekiq_web_path } from '@/rails/routes';
+import { home_show_path, mission_control_jobs_path, root_path } from '@/rails/routes';
 import { Link } from '@inertiajs/react';
 import { ModalLink } from '@inertiaui/modal-react';
 
@@ -18,28 +18,28 @@ export default function Index({ message }: Props) {
 
       <div className="mt-8 flex flex-wrap gap-4">
         <Button asChild>
-          <Link href="https://rubyonrails.org/" target="_blank" rel="noopener noreferrer">
+          <a href="https://rubyonrails.org/" target="_blank" rel="noopener noreferrer">
             Rails Docs
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
-          <Link href="https://react.dev/" target="_blank" rel="noopener noreferrer">
+          <a href="https://react.dev/" target="_blank" rel="noopener noreferrer">
             React Docs
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
-          <Link href="https://inertiajs.com/" target="_blank" rel="noopener noreferrer">
+          <a href="https://inertiajs.com/" target="_blank" rel="noopener noreferrer">
             Inertia.js Docs
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
-          <Link href="https://ui.shadcn.com/" target="_blank" rel="noopener noreferrer">
+          <a href="https://ui.shadcn.com/" target="_blank" rel="noopener noreferrer">
             Shadcn/UI
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
-          <a href={sidekiq_web_path()} target="_blank" rel="noopener noreferrer">
-            Sidekiq
+          <a href={mission_control_jobs_path()} target="_blank" rel="noopener noreferrer">
+            Jobs
           </a>
         </Button>
         <Button variant="outline" asChild>
@@ -47,15 +47,7 @@ export default function Index({ message }: Props) {
         </Button>
 
         <Button variant="outline" asChild>
-          <ModalLink href={home_show_path()} navigate={true}>
-            Open Modal (with URL)
-          </ModalLink>
-        </Button>
-
-        <Button variant="outline" asChild>
-          <ModalLink href={home_show_path()} navigate={false}>
-            Open Modal (without URL)
-          </ModalLink>
+          <ModalLink href={home_show_path()}>Open Modal</ModalLink>
         </Button>
       </div>
     </div>

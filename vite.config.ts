@@ -15,15 +15,25 @@ export default defineConfig(({ mode }) => ({
     tailwindcss(),
     ...(mode === 'development' ? [devtools({ vconsole: true, eruda: true })] : []),
   ],
+  ssr: {
+    noExternal: [
+      '@floating-ui/dom',
+      '@floating-ui/react',
+      '@inertiajs/react',
+      '@inertiaui/modal-react',
+      '@sentry/react',
+      '@tanstack/react-table',
+      'date-fns',
+      'lucide-react',
+      'react-day-picker',
+      'react-resizable-panels',
+      'recharts',
+    ],
+  },
   resolve: {
     alias: {
       '@/rails': path.resolve(__dirname, 'app/javascript'),
       '@': path.resolve(__dirname, 'app/frontend'),
-      // Uncomment the snippet below if you'd like to enable React profiling in production
-      // ...(mode === 'production' && {
-      //   'react-dom/client': 'react-dom/profiling',
-      //   'scheduler/tracing': 'scheduler/tracing-profiling',
-      // }),
     },
   },
 }));

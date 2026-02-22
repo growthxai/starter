@@ -3,14 +3,15 @@
 import { createInertiaApp } from '@inertiajs/react';
 import { renderApp } from '@inertiaui/modal-react';
 import * as Sentry from '@sentry/react';
-import { createRoot } from 'react-dom/client';
-import { initTheme } from '../lib/theme';
+import { createRoot, hydrateRoot } from 'react-dom/client';
 import resolvePageLayout from '../lib/layout-resolver';
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 
-// Initialize theme system
-initTheme();
+if (!import.meta.env.SSR) {
+  const { initTheme } = await import('../lib/theme');
+  initTheme();
+}
 
 createInertiaApp({
   resolve: (name): any => {
@@ -20,12 +21,9 @@ createInertiaApp({
   },
 
   setup({ el, App, props }) {
-    if (SENTRY_DSN) {
-      console.log('Initializing Sentry');
+    if (!import.meta.env.SSR && SENTRY_DSN) {
       Sentry.init({
         dsn: SENTRY_DSN,
-        // Setting this option to true will send default PII data to Sentry.
-        // For example, automatic IP address collection on events
         sendDefaultPii: true,
         integrations: [
           Sentry.replayIntegration({
@@ -34,13 +32,17 @@ createInertiaApp({
             blockAllMedia: false,
           }),
         ],
-        replaysSessionSampleRate: 0.5, // This sets the sample rate at 50%. You may want to change it to 100% while in development and then sample at a lower rate in production.
-        replaysOnErrorSampleRate: 1.0, // If you're not already sampling the entire session, change the sample rate to 100% when sampling sessions where errors occur.
+        replaysSessionSampleRate: 0.5,
+        replaysOnErrorSampleRate: 1.0,
       });
-    } else {
-      console.log('SENTRY_DSN is not set, skipping Sentry initialization');
     }
-    const root = createRoot(el);
-    root.render(renderApp(App, props));
+
+    const appElement = renderApp(App, props);
+
+    if (el && el.hasChildNodes()) {
+      hydrateRoot(el, appElement);
+    } else {
+      createRoot(el).render(appElement);
+    }
   },
 });
