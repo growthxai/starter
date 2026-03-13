@@ -23,6 +23,7 @@ FileUtils.chdir APP_ROOT do
   puts "\n== Setting up database =="
   system! "bin/rails db:create"
   system! "bin/rails db:schema:load"
+  system! "bin/rails db:migrate"
 
   puts "\n== Removing old logs and tempfiles =="
   system! "bin/rails log:clear tmp:clear"
