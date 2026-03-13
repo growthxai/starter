@@ -20,6 +20,11 @@ FileUtils.chdir APP_ROOT do
   #   FileUtils.cp "config/database.yml.sample", "config/database.yml"
   # end
 
+  puts "\n== Installing Solid Stack migrations =="
+  system! "bin/rails solid_queue:install:migrations"
+  system! "bin/rails solid_cache:install:migrations"
+  system! "bin/rails solid_cable:install:migrations"
+
   puts "\n== Preparing database =="
   system! "bin/rails db:prepare"
 
